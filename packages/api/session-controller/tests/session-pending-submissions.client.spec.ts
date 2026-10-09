@@ -292,8 +292,9 @@ describe('observed retirement', () => {
       await pushEvent(mock, { type: 'agent/inbox/spliced', seq: SessionSeq(1), time: 2,
         data: { target: 'next-step', start: 0, inserted: [steerMessage] } })
       flush()
-      expect(pending()).toEqual(['opening', 'steering'])
-      expect(queueRetired).toHaveBeenCalledExactlyOnceWith({ reason: 'observed', attachments: [imageRef('queued-image')] })
+      // Acceptance records the receipt; the queued echo keeps its row for the claim gap.
+      expect(pending()).toEqual(['opening', 'queued', 'steering'])
+      expect(queueRetired).not.toHaveBeenCalled()
       await pushEvent(mock, ev.turnStart(SessionSeq(2), 1))
       await pushEvent(mock, { type: 'agent/inbox/spliced', seq: SessionSeq(3), time: 4,
         data: { target: 'next-step', start: 0, removedCount: 1, inserted: [] } })
@@ -304,13 +305,13 @@ describe('observed retirement', () => {
       await pushEvent(mock, ev.stepStart(SessionSeq(5), 1, 1))
       await pushEvent(mock, { type: 'user/message', seq: SessionSeq(6), time: 7, surfaceOp: 'append', data: steerMessage })
       flush()
-      expect(pending()).toEqual(projectionFirst ? ['opening'] : ['opening', 'steering'])
+      expect(pending()).toEqual(projectionFirst ? ['opening', 'queued'] : ['opening', 'queued', 'steering'])
       expect(normalRetired).not.toHaveBeenCalled()
       if (!projectionFirst) expect(steerRetired).not.toHaveBeenCalled()
       await pushEvent(mock, { type: 'user/message', seq: SessionSeq(7), time: 8, surfaceOp: 'append', data: normalMessage })
       flush()
       if (!projectionFirst) {
-        expect(pending()).toEqual(['opening', 'steering'])
+        expect(pending()).toEqual(['opening', 'queued', 'steering'])
         session.projections.apply('inbox', accepted, SessionSeq(1))
         flush()
         expect(normalRetired).not.toHaveBeenCalled()
@@ -318,7 +319,8 @@ describe('observed retirement', () => {
         await Promise.resolve()
         flush()
       }
-      expect(pending()).toEqual([])
+      // The queued message still waits in next-turn, so its echo is the row that survives.
+      expect(pending()).toEqual(['queued'])
       expect(normalRetired).toHaveBeenCalledExactlyOnceWith({ reason: 'observed', attachments: [fileRef('opening-file')] })
       expect(steerRetired).toHaveBeenCalledExactlyOnceWith({
         reason: 'observed', attachments: [imageRef('steer-image'), fileRef('steer-file')],
@@ -331,6 +333,9 @@ describe('observed retirement', () => {
       await pushEvent(mock, ev.stepStart(SessionSeq(12), 2, 2))
       await pushEvent(mock, { type: 'user/message', seq: SessionSeq(13), time: 14, surfaceOp: 'append', data: queuedMessage })
       session.projections.apply('inbox', { 'next-turn': [], 'next-step': [] }, SessionSeq(11))
+      // The watermark completes the admitted handoff through the projection observer, which
+      // runs before the frame that retires the echo.
+      await Promise.resolve()
       flush()
       expect(queueRetired).toHaveBeenCalledTimes(1)
       expect(pending()).toEqual([])
@@ -410,8 +415,9 @@ describe('observed retirement', () => {
     })
   }
 
-  it('a queue occurrence carrying the rpcId retires the echo (running-turn submissions)', async ({ mock, start }) => {
+  it('keeps a queued echo through acceptance and claim until transcript admission', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
+    await session.open()
     const retirements: PendingSubmissionRetirement[] = []
     session.handleRunning(true)
     const handle = session.beginSubmission({
@@ -421,14 +427,111 @@ describe('observed retirement', () => {
       onRetire: retirement => retirements.push(retirement),
     })
     const refs = [imageRef('att-q')]
-    session.projections.apply('inbox', { 'next-turn': [queuedItem(handle.requestId, refs)], 'next-step': [] }, SessionSeq(1))
+    const message = queuedItem(handle.requestId, refs)
+    const echo = session.getSnapshot().pendingSubmissions[0]
+    // Acceptance records the receipt; QueueDock renders the Host row while the echo stays
+    // in the snapshot, so the row survives the handoff below.
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(0), time: 1,
+      data: { target: 'next-turn', start: 0, inserted: [message] },
+    })
+    session.projections.apply('inbox', { 'next-turn': [message], 'next-step': [] }, SessionSeq(0))
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toEqual([echo])
+    expect(retirements).toEqual([])
+    // The claim that moves the queued message into the running turn drops the Host row
+    // before the durable user/message arrives: the echo is what keeps the row visible.
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(1), time: 2,
+      data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [] },
+    })
+    session.projections.apply('inbox', { 'next-turn': [], 'next-step': [] }, SessionSeq(1))
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toEqual([echo])
+    expect(retirements).toEqual([])
+    await pushEvent(mock, promptEvent(SessionSeq(2), handle.requestId, refs))
     await settleFrames()
     expect(session.getSnapshot().pendingSubmissions).toEqual([])
     expect(retirements).toEqual([{ reason: 'observed', attachments: refs }])
-    // The queue projection keeps the correlation id for render-time dedupe.
-    expect(session.projections.get('inbox')).toMatchObject({
-      'next-turn': [{ source: { rpcId: handle.requestId } }],
+  })
+
+  it('keeps a steered queued echo visible after its next-turn row is canceled', async ({ mock, start }) => {
+    const session = await sessionBench(mock, start, SID)
+    await session.open()
+    const retirements: PendingSubmissionRetirement[] = []
+    session.handleRunning(true)
+    const handle = session.beginSubmission({
+      mode: 'queue',
+      text: '排队后转入下一步',
+      attachments: [],
+      onRetire: retirement => retirements.push(retirement),
     })
+    const message = queuedItem(handle.requestId, [])
+    const echo = session.getSnapshot().pendingSubmissions[0]
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(0), time: 1,
+      data: { target: 'next-turn', start: 0, inserted: [message] },
+    })
+    // The client asks for the promotion; that request is what separates Steer's cancellation
+    // from a removal, which rejects the submission and retires its echo. The row it targets
+    // comes from the Inbox projection the dock rendered.
+    session.projections.apply('inbox', { 'next-turn': [message], 'next-step': [] }, SessionSeq(0))
+    await session.updateQueue(message.id, { kind: 'steer' })
+    // Steer releases the next-turn row and promotes the same message to next-step inside one
+    // notification. QueueDock renders neither destination row, so retiring the echo on that
+    // canceled row would blank a message that is still on its way into the turn.
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(1), time: 2,
+      data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [], outcome: 'canceled' },
+    })
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(2), time: 3,
+      data: { target: 'next-step', start: 0, inserted: [message] },
+    })
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toEqual([echo])
+    expect(retirements).toEqual([])
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(3), time: 4,
+      data: { target: 'next-step', start: 0, removedCount: 1, inserted: [] },
+    })
+    session.projections.apply('inbox', { 'next-turn': [], 'next-step': [] }, SessionSeq(3))
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toEqual([echo])
+    await pushEvent(mock, promptEvent(SessionSeq(4), handle.requestId))
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toEqual([])
+    expect(retirements).toEqual([{ reason: 'observed', attachments: [] }])
+  })
+
+  it('retires a canceled queued echo the client never asked to promote', async ({ mock, start }) => {
+    const session = await sessionBench(mock, start, SID)
+    await session.open()
+    const retirements: PendingSubmissionRetirement[] = []
+    session.handleRunning(true)
+    const handle = session.beginSubmission({
+      mode: 'queue',
+      text: '被删除',
+      attachments: [],
+      onRetire: retirement => retirements.push(retirement),
+    })
+    const message = queuedItem(handle.requestId, [])
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(0), time: 1,
+      data: { target: 'next-turn', start: 0, inserted: [message] },
+    })
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toHaveLength(1)
+    // A removal carries the same canceled outcome as a promotion, but nothing re-inserts the
+    // message: the submission is rejected, so its sending row must not outlive it.
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(1), time: 2,
+      data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [], outcome: 'canceled' },
+    })
+    session.projections.apply('inbox', { 'next-turn': [], 'next-step': [] }, SessionSeq(1))
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toEqual([])
+    expect(retirements).toEqual([{ reason: 'failed' }])
   })
 
   it('retires a mixed echo with durable references in original selection order', async ({ mock, start }) => {
@@ -582,6 +685,31 @@ describe('observed retirement', () => {
 })
 
 describe('disposal', () => {
+  it('settles an accepted queued echo as observed when disposed before admission', async ({ mock, start }) => {
+    const session = await sessionBench(mock, start, SID)
+    await session.open()
+    const retirements: PendingSubmissionRetirement[] = []
+    session.handleRunning(true)
+    const handle = session.beginSubmission({
+      mode: 'queue', text: '已接受', attachments: [],
+      onRetire: retirement => retirements.push(retirement),
+    })
+    const refs = [imageRef('held-image')]
+    const message = queuedItem(handle.requestId, refs)
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(0), time: 1,
+      data: { target: 'next-turn', start: 0, inserted: [message] },
+    })
+    session.projections.apply('inbox', { 'next-turn': [message], 'next-step': [] }, SessionSeq(0))
+    await settleFrames()
+    // Host accepted the message, so disposal completes that handoff instead of telling the
+    // composer to restore a draft for work the queue still owns.
+    await session.dispose()
+    await settleFrames()
+    expect(session.getSnapshot().pendingSubmissions).toEqual([])
+    expect(retirements).toEqual([{ reason: 'observed', attachments: refs }])
+  })
+
   it('settles an admitted transcript as observed when disposed before the Inbox watermark arrives', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     await session.open()

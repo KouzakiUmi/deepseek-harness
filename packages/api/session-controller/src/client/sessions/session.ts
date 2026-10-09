@@ -145,6 +145,12 @@ export class Session implements SessionFace {
     readonly onRetire?: ((retirement: PendingSubmissionRetirement) => void) | undefined
     retiring: boolean
   }>()
+  /**
+   * Queued echoes whose occurrence this client asked the Host to promote to the
+   * next step. Steer cancels the next-turn row and re-inserts the same message,
+   * so that cancellation must not retire the echo the way a rejection does.
+   */
+  private readonly steeringPromotions = new Set<SessionRequestId>()
   /** Owns the addressed page/follow lifecycle while this Session is open. */
   private events: SessionEventStream | undefined
 
@@ -334,7 +340,23 @@ export class Session implements SessionFace {
 
   /** Apply one operation to a still-pending queue occurrence. */
   async updateQueue(itemId: MessageId, action: QueueAction): Promise<RemoteResult<{ accepted: true }>> {
-    return this.remote.session.updateQueue({ sessionId: this.sessionId, itemId, action })
+    const promoted = action.kind === 'steer' ? this.pendingRpcId(itemId) : undefined
+    if (promoted !== undefined) this.steeringPromotions.add(promoted)
+    const result = await this.remote.session.updateQueue({ sessionId: this.sessionId, itemId, action })
+    if (promoted !== undefined && !result.ok) this.steeringPromotions.delete(promoted)
+    return result
+  }
+
+  /** Correlate one still-pending inbox occurrence with its submission echo. */
+  private pendingRpcId(itemId: MessageId): SessionRequestId | undefined {
+    const inbox = this.projections.get('inbox') as InboxState | undefined
+    for (const target of ['next-turn', 'next-step'] as const) {
+      for (const message of inbox?.[target] ?? []) {
+        const source = message.source
+        if (message.id === itemId && source.kind === 'user' && 'rpcId' in source) return source.rpcId
+      }
+    }
+    return undefined
   }
 
   /**
@@ -602,7 +624,11 @@ export class Session implements SessionFace {
     // release browser resources; admitted echoes keep their observed outcome.
     for (const [requestId, settlement] of [...this.submissionSettlements]) {
       if (settlement.admitted !== undefined) this.scheduleObservedRetirement(requestId, settlement.admitted)
-      else this.retireFailedSubmission(requestId)
+      else if (settlement.receipt !== undefined && !settlement.retiring) {
+        // The Host already accepted this submission, so disposal completes that handoff
+        // instead of reporting a failure the composer would answer by restoring a draft.
+        this.finishSubmission(requestId, { reason: 'observed', attachments: settlement.receipt.attachments })
+      } else this.retireFailedSubmission(requestId)
     }
     this.openGeneration++
     const events = this.events
@@ -769,7 +795,12 @@ export class Session implements SessionFace {
         const receipt = settlement.receipt
         if (receipt?.target !== target || receipt.index === null || receipt.seq >= event.seq) continue
         const removed = receipt.index >= start && receipt.index < start + removedCount
-        if (removed && outcome === 'canceled') this.retireFailedSubmission(requestId)
+        // A canceled row is a rejection unless this client asked for the promotion: Steer
+        // cancels the next-turn row and re-inserts the same message into next-step inside
+        // one notification, and the echo follows its message rather than the canceled row.
+        if (removed && outcome === 'canceled'
+          && (settlement.placement !== 'queued'
+            || !this.steeringPromotions.has(requestId))) this.retireFailedSubmission(requestId)
         else settlement.receipt = {
           ...receipt,
           seq: event.seq,
@@ -795,8 +826,7 @@ export class Session implements SessionFace {
       const source = message.source
       if (source.kind !== 'user' || !('rpcId' in source)) continue
       const settlement = this.submissionSettlements.get(source.rpcId)
-      if (settlement === undefined || settlement.placement === 'queued'
-        || settlement.retiring || (settlement.receipt?.seq ?? -1) > seq) continue
+      if (settlement === undefined || settlement.retiring || (settlement.receipt?.seq ?? -1) > seq) continue
       settlement.receipt = { target, seq, index: start + index, attachments: attachmentRefsIn(message.content) }
     }
   }
@@ -806,10 +836,10 @@ export class Session implements SessionFace {
     if (source.kind !== 'user' || !('rpcId' in source)) return
     const settlement = this.submissionSettlements.get(source.rpcId)
     if (settlement === undefined || settlement.retiring) return
-    if (!admitted) {
-      if (settlement.placement === 'queued') this.scheduleObservedRetirement(source.rpcId, attachmentRefsIn(message.content))
-      return
-    }
+    // Inbox acceptance is not admission. A queued echo keeps rendering its row until the
+    // durable user/message arrives, so the claim that moves the message into the running
+    // turn never blanks the message between the queue strip and the transcript.
+    if (!admitted) return
     settlement.admitted = attachmentRefsIn(message.content)
     this.retireAdmittedSubmission(source.rpcId)
   }
@@ -824,7 +854,7 @@ export class Session implements SessionFace {
     this.scheduleObservedRetirement(requestId, settlement.admitted)
   }
 
-  /** Inbox acceptance retires queued echoes; its watermark completes admitted Chat handoffs. */
+  /** Inbox observation records receipts; its watermark completes admitted Chat handoffs. */
   private observeSubmissionInbox(): void {
     if (this.submissionSettlements.size === 0) return
     const inbox = this.projections.get('inbox') as InboxState | undefined
@@ -867,6 +897,7 @@ export class Session implements SessionFace {
     /* v8 ignore next -- retiring latches before every schedule, so one settlement never finishes twice. */
     if (settlement === undefined) return
     this.submissionSettlements.delete(requestId)
+    this.steeringPromotions.delete(requestId)
     this.pendingSubmissions = this.pendingSubmissions.filter(echo => echo.requestId !== requestId)
     this.notifier.markDirty()
     settlement.onRetire?.(retirement)

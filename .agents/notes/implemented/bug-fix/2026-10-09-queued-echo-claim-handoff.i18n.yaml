@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-09-queued-echo-claim-handoff.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-09-queued-echo-claim-handoff.md
+/agent-note-keep-a-queued-submission-echo-visible-until-its-message-is-admitted:
+  en: aa894ed3cacffeb4
+  zh: be2314a47475da6b
+/agent-note-keep-a-queued-submission-echo-visible-until-its-message-is-admitted/problem:
+  en: 3b5c1a62fb4e2cb5
+  zh: 1bb1b3a681ee0f9b
+/agent-note-keep-a-queued-submission-echo-visible-until-its-message-is-admitted/decision:
+  en: 7aadc36e052e32cd
+  zh: cfc11e033eb9ab4f
+/agent-note-keep-a-queued-submission-echo-visible-until-its-message-is-admitted/alternatives-considered:
+  en: 74741a9a0c8b1a81
+  zh: 80b6a28f360f0d94
+/agent-note-keep-a-queued-submission-echo-visible-until-its-message-is-admitted/consequences:
+  en: a3018a90b441631b
+  zh: a45d38c5fe1fbbb3
+/agent-note-keep-a-queued-submission-echo-visible-until-its-message-is-admitted/verification:
+  en: 4f3746fbddd7c19c
+  zh: e1f3ef57ae1f237c

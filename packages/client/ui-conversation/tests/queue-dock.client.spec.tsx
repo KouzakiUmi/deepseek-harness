@@ -175,6 +175,21 @@ describe('QueueDock', () => {
     expect(container.innerHTML).toBe('')
   })
 
+  it('leaves a promoted queued echo to the pending input already carrying its rpcId', () => {
+    const requestId = 'req-promoted' as never
+    const promoted: UserMessage = { ...row('q-1', 'input'), source: { kind: 'user', rpcId: requestId } }
+    const snap = {
+      ...snapshotWith([], [promoted]),
+      pendingSubmissions: [{
+        requestId, placement: 'queued' as const, time: 1_000, text: 'input', attachments: [],
+      }],
+    }
+    const source = liveSession(snap)
+    const { container } = render(<QueueDock {...kitFor(snap)} useSession={source.useSession} useProjection={source.useProjection} />)
+    // Chat renders the next-step row as pending input, so the strip must not draw a second copy.
+    expect(container.querySelector('[data-queue-dock]')).toBeNull()
+  })
+
   it('renders a queued local echo in the dock and hands off by rpcId', () => {
     const pending = {
       ...snapshotWith([]),

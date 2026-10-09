@@ -117,13 +117,18 @@ export function QueueDock({ useSession, useProjection, updateQueue, notify, load
     ))
   }, [inbox, pendingSubmissions])
   const pendingQueue = useMemo(() => {
-    const admitted = new Set(queue.flatMap(({ source }) => (
-      source.kind === 'user' && 'rpcId' in source ? [source.rpcId] : []
-    )))
+    // A promoted row renders in Chat as pending input, so it is not the strip's to draw:
+    // the strip owns a queued echo only while no Inbox destination presents the message.
+    const admitted = new Set([
+      ...queue.flatMap(({ source }) => (source.kind === 'user' && 'rpcId' in source ? [source.rpcId] : [])),
+      ...(inbox?.['next-step'] ?? []).flatMap(({ source }) => (
+        source.kind === 'user' && 'rpcId' in source ? [source.rpcId] : []
+      )),
+    ])
     return pendingSubmissions.filter(submission => (
       submission.placement === 'queued' && !admitted.has(submission.requestId)
     ))
-  }, [pendingSubmissions, queue])
+  }, [inbox, pendingSubmissions, queue])
   const rowCount = queue.length + pendingQueue.length
   const running = useSession(s => s.running)
   const queueMutable = useSession(s => s.subagent === null || s.subagent.address.mode === 'continuable')

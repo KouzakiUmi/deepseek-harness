@@ -67,11 +67,12 @@ export interface ISession {
   readonly projections: ProjectionsFace
   /**
    * Register one local submission echo in `snapshot.pendingSubmissions`,
-   * synchronously, before the caller serializes and sends the prompt. The
-   * Chat echoes persist until durable admission; transcript identities also
-   * wait for the Inbox claim watermark so stale queue rows stay suppressed.
-   * Queued echoes retire on queue acceptance. Identified failures retire
-   * submissions that have not already reached durable admission.
+   * synchronously, before the caller serializes and sends the prompt. Every
+   * placement persists until durable admission, so a queued row keeps an owner
+   * through the claim that promotes its message into the running turn;
+   * transcript identities also wait for the Inbox claim watermark so stale
+   * queue rows stay suppressed. Identified failures and rejected queue
+   * occurrences retire submissions that never reached durable admission.
    * @param input - echo content and the optional settlement callback.
    * @returns the minted identity for {@link prompt} plus the pre-prompt abandon path.
    */
