@@ -20,7 +20,7 @@
       - option "amazon-bedrock"
       - option "ant-ling"
       - option "anthropic"
-      - option "azure-openai-responses"
+      - option "azure"
       - option "baseten"
       - option "cerebras"
       - option "cloudflare-ai-gateway"
