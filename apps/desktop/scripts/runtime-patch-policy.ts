@@ -20,6 +20,8 @@ export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatc
 
 /** Reviewed Desktop dependency constraints, independent of patch selection. */
 export const DESKTOP_RUNTIME_DEPENDENCY_OVERRIDES: Readonly<Record<string, string>> = {
+  '@deepseek-ai/libreoffice-kit>fflate': '0.8.3',
+  'cacheable-request>http-cache-semantics': '4.3.0',
   // The provider declares ^1.2.0; its patch is qualified against 1.2.0.
   '@earendil-works/pi-ai@^1.2.0': '1.2.0',
 }

@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
@@ -46,18 +46,27 @@ function runPnpm(args: string[], cwd: string, timeout: number): string {
 describe('published document preview licenses', () => {
   it.skipIf(!existsSync(bundlePath))('keeps bundled licenses in the packed lazy chunks', ({ task }) => {
     expect(existsSync(pdfChunkPath)).toBe(true)
+    const deadline = performance.now() + task.timeout
+    const remaining = (): number => {
+      const milliseconds = Math.ceil(deadline - performance.now())
+      if (milliseconds <= 0) throw new Error('Published artifact inspection exhausted its test budget')
+      return milliseconds
+    }
     const output = mkdtempSync(join(tmpdir(), 'dsh-document-preview-pack-'))
     try {
       const packed = JSON.parse(runPnpm([
         'pack', '--json', '--pack-destination', output,
-      ], packageRoot, task.timeout)) as { filename: string; files: { path: string }[] }
+      ], packageRoot, remaining())) as { filename: string; files: { path: string }[] }
       expect(packed.files.map(file => file.path)).toContain('lib/client.js')
       expect(packed.files.map(file => file.path)).toContain('lib/client.pdf.js')
       expect(packed.files.map(file => file.path)).toContain('lib/client.frontmatter-fields.js')
       expect(packed.files.some(file => file.path.endsWith('pdfjs-NOTICES.txt'))).toBe(false)
 
-      const client = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.js'], packageRoot, task.timeout)
-      const pdf = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.pdf.js'], packageRoot, task.timeout)
+      const archive = resolve(packageRoot, packed.filename)
+      // Keep drive-letter colons out of GNU tar arguments on Windows.
+      const readPacked = (entry: string): string => run('tar', ['-xOf', basename(archive), entry], dirname(archive), remaining())
+      const client = readPacked('package/lib/client.js')
+      const pdf = readPacked('package/lib/client.pdf.js')
       expect([...client.matchAll(/require\.async\("(\.\/client[^"/]*\.js)"\)/gu)].map(match => match[1]))
         .toEqual(['./client.frontmatter-fields.js', './client.pdf.js', './client.excel.js'])
       expect(client).not.toMatch(/\brequire\("\.\/client[^"/]*\.js"\)/u)
@@ -66,7 +75,7 @@ describe('published document preview licenses', () => {
       expect(client).not.toContain('//! Bundled PDF.js license notices')
       expect(client).not.toContain('/pdfjs-dist/')
       expect(pdf).toContain('//! Bundled PDF.js license notices')
-      const excel = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.excel.js'], packageRoot, task.timeout)
+      const excel = readPacked('package/lib/client.excel.js')
       expect(excel).not.toMatch(/\brequire\("\.\/client[^"/]*\.js"\)/u)
       expect(client).not.toContain('FortuneSheet')
       expect(excel).toContain('//! Bundled spreadsheet license notices')
@@ -77,7 +86,7 @@ describe('published document preview licenses', () => {
         const license = readFileSync(join(root, 'LICENSE'), 'utf8').trimEnd()
         expect(excel).toContain(license.split('\n').map(line => `// ${line}`).join('\n'))
       }
-      const frontmatter = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.frontmatter-fields.js'], packageRoot, task.timeout)
+      const frontmatter = readPacked('package/lib/client.frontmatter-fields.js')
       expect(frontmatter).not.toMatch(/\brequire\("\.\/client[^"/]*\.js"\)/u)
       let frontmatterInitialized = false
       runInNewContext(frontmatter, { window: { __ModuleLoader__: { load: (registration: {
@@ -113,5 +122,5 @@ describe('published document preview licenses', () => {
     } finally {
       rmSync(output, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 })

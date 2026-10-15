@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { zipSync } from 'fflate'
@@ -82,6 +82,24 @@ it('extracts a hash-verified cached library without a Python installer or networ
     expect(await readFile(join(root, 'site-packages/sample.py'), 'utf8')).toBe('sample = 42\n')
     await writeFile(archive, 'corrupt archive')
     await expect(downloadPrimaryRuntimeAsset('https://unused.invalid/library.whl', hash, root)).rejects.toThrow('checksum mismatch')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('rejects wheel symlinks before creating a link or touching an external file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-wheel-links-'))
+  try {
+    const outside = join(root, 'outside.txt')
+    const destination = join(root, 'site-packages')
+    const archive = join(root, 'linked.whl')
+    await writeFile(outside, 'keep this file')
+    await writeFile(archive, zipSync({
+      escape: [Buffer.from('../outside.txt'), { os: 3, attrs: (0o120777 << 16) >>> 0 }],
+    }))
+    await expect(unpackPrimaryRuntimeWheel(archive, destination)).rejects.toThrow('links and special entries are not supported')
+    expect(await readFile(outside, 'utf8')).toBe('keep this file')
+    await expect(lstat(join(destination, 'escape'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -18,14 +18,14 @@ export interface TlsFixture {
 
 const COMMON_NAME = 'localhost'
 
-let generated: { cert: string; key: string } | undefined
+let generated: Promise<{ cert: string; key: string }> | undefined
 
-/** One self-signed localhost certificate per process; RSA key generation is the only slow part. */
-function tlsPems(): { cert: string; key: string } {
-  generated ??= (() => {
-    const { cert, private: key } = generate([{ name: 'commonName', value: COMMON_NAME }], {
+/** One self-signed localhost certificate per process; concurrent fixtures share its generation. */
+function tlsPems(): Promise<{ cert: string; key: string }> {
+  generated ??= (async () => {
+    const { cert, private: key } = await generate([{ name: 'commonName', value: COMMON_NAME }], {
       keySize: 2048,
-      days: 30,
+      notAfterDate: new Date(Date.now() + 30 * 24 * 60 * 60_000),
       algorithm: 'sha256',
       extensions: [
         { name: 'basicConstraints', cA: false },
@@ -42,7 +42,7 @@ function tlsPems(): { cert: string; key: string } {
       ],
     })
     return { cert, key }
-  })()
+  })().catch((error: unknown) => { generated = undefined; throw error })
   return generated
 }
 
@@ -52,7 +52,7 @@ function tlsPems(): { cert: string; key: string } {
  * @returns the written paths plus the PEM a client trusts.
  */
 export async function materializeTlsFixture(directory: string): Promise<TlsFixture> {
-  const pems = tlsPems()
+  const pems = await tlsPems()
   const root = resolve(directory)
   const fixture: TlsFixture = {
     certFile: join(root, 'tls-cert.pem'),

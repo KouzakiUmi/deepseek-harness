@@ -47,6 +47,8 @@ it('classifies the current workspace and shares only runtime patch bytes', () =>
   const settings = yaml.load(readFileSync(join(project, 'pnpm-workspace.yaml'), 'utf8')) as { overrides: Record<string, string> }
   expect(settings.overrides['@earendil-works/pi-ai']).toBeUndefined()
   expect(settings.overrides['@earendil-works/pi-ai@^1.2.0']).toBe('1.2.0')
+  expect(settings.overrides['@deepseek-ai/libreoffice-kit>fflate']).toBe('0.8.3')
+  expect(settings.overrides['cacheable-request>http-cache-semantics']).toBe('4.3.0')
   expect(readFileSync(join(repository, 'pnpm-lock.yaml'))).toEqual(before)
 })
 

@@ -13,6 +13,7 @@ import { x as extractTar } from 'tar'
 import { copyPrimaryRuntime, parsePrimaryRuntime, workspaceDependencyPaths, type PrimaryRuntimeManifest } from '@deepseek-ai/dsh-tool-workspace-dependencies'
 import lock from './lock.json' with { type: 'json' }
 import { prunePrimaryRuntimePythonTests } from './prune-python-tests.ts'
+import { assertRegularZipEntry } from './zip-entry.ts'
 
 /**
  * Download or reuse an archive only when its bytes match the release lock.
@@ -93,7 +94,7 @@ export async function downloadNodeRuntime(target: PrimaryRuntimeTarget, destinat
   const archive = await downloadPrimaryRuntimeAsset(`https://nodejs.org/dist/v${lock.nodeVersion}/${filename}`, artifact.nodeSha256, cache)
   const staging = mkdtempSync(join(tmpdir(), 'dsh-node-'))
   try {
-    if (target === 'win-x64') await extractZip(archive, { dir: staging })
+    if (target === 'win-x64') await extractZip(archive, { dir: staging, onEntry: assertRegularZipEntry })
     else await extractTar({ file: archive, cwd: staging })
     const source = join(staging, filename.replace(/\.(?:zip|tar\.gz)$/u, ''))
     mkdirSync(join(destination, 'bin'), { recursive: true })
@@ -140,6 +141,7 @@ export async function unpackPrimaryRuntimeWheel(archive: string, destination: st
   await extractZip(archive, {
     dir: destination,
     onEntry: (entry) => {
+      assertRegularZipEntry(entry)
       const [directory, scheme] = entry.fileName.split('/')
       if (directory?.endsWith('.data') && scheme !== '' && scheme !== 'scripts') {
         throw new Error(`primary runtime: wheel requires unsupported installation paths: ${entry.fileName}`)

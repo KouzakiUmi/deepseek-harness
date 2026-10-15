@@ -222,10 +222,7 @@ function underPackages(file: string): string {
  * @returns the value text, or undefined when the rule or declaration is absent.
  */
 function declaredValue(file: string, selector: string, property: string): string | undefined {
-  const path = packageStylesheets().find(candidate => candidate.endsWith(`/${file}`))
-  /* v8 ignore next -- the manifest names shipped stylesheets; a missing one is reported by the height assertion below. */
-  if (path === undefined) return undefined
-  const rule = parseRules(readFileSync(path, 'utf8')).find(candidate => candidate.selectors.includes(selector))
+  const rule = parseRules(readFileSync(join(PACKAGES_DIR, file), 'utf8')).find(candidate => candidate.selectors.includes(selector))
   return rule?.declarations.find(([name]) => name === property)?.[1]
 }
 
