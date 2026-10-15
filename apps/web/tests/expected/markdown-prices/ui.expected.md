@@ -1,0 +1,33 @@
+- banner:
+  - navigation "Session hierarchy": Dollar prices and formulas
+  - button "More actions"
+  - button "Open right sidebar"
+  - tablist:
+    - tab "Chat" [selected]
+    - tab "Trajectory"
+- text: Render dollar prices with formulas. {{clock}}
+- button "Copy"
+- status: Completed
+- button "Completed in {{duration}}" [disabled]
+- heading "Dollar prices and formulas" [level=2]
+- paragraph: 输入 $0.75 / 缓存读 $0.075 / 输出 $3.75
+- paragraph: 输入 $3 / 缓存读 $0.3 / 输出 $15（缓存写 $12.50；长输入 $20 / $75）
+- paragraph: Prices range from $5 to $10.
+- paragraph:
+  - text: Equations
+  - math: x 2
+  - text: and
+  - math: 2 + 2
+  - text: .
+- paragraph: DOLLAR_PRICES_DONE
+- button "Copy"
+- button "Good response"
+- button "Bad response"
+- button "Branch into a new conversation"
+- text: {{clock}}
+- textbox "Message or run a task, / commands, @ files or sessions"
+- button "Add files or run commands"
+- 'button "Access mode, current: Workspace Write"': Workspace Write
+- button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash
+- button "Send message" [disabled]
+- button "1 turns 1 steps"

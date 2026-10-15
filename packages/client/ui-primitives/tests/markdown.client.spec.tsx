@@ -377,6 +377,61 @@ describe('MarkdownText', () => {
     expect(screen.getByText('**unfinished')).toBeTruthy()
   })
 
+  it.each([
+    '输入 $0.75 / 缓存读 $0.075 / 输出 $3.75',
+    '输入 $3 / 缓存读 $0.3 / 输出 $15（缓存写 $12.50；长输入 $20 / $75）',
+    'Prices range from $5 to $10.',
+  ])('keeps dollar prices as ordinary conversation text: %s', (source) => {
+    const { container } = render(<MarkdownText text={source} />)
+
+    expect(container.querySelector('.katex')).toBeNull()
+    expect(container.textContent).toBe(source)
+  })
+
+  it('keeps prices literal beside ordinary inline formulas', () => {
+    const price = '输入 $0.75 / 缓存读 $0.075 / 输出 $3.75'
+    const { container } = render(<MarkdownText text={`${price}; equations $x^2$ and $2+2$.`} />)
+
+    expect(container.textContent).toContain(price)
+    expect([...container.querySelectorAll('annotation')].map(node => node.textContent)).toEqual(['x^2', '2+2'])
+  })
+
+  it('keeps parenthesized English price prose from consuming its following formula', () => {
+    const { container } = render(<MarkdownText text={'between $5 and $10 (see $x$)'} />)
+
+    expect(container.textContent).toContain('between $5 and $10 (see ')
+    expect([...container.querySelectorAll('annotation')].map(node => node.textContent)).toEqual(['x'])
+  })
+
+  it('preserves symmetric math padding and prices during streaming settlement', () => {
+    const source = '输入 $0.75 / 缓存读 $0.075 / 输出 $3.75'
+    const view = render(<MarkdownText text={source} streaming />)
+    expect(view.container.textContent).toBe(source)
+    view.rerender(<MarkdownText text={source} />)
+    expect(view.container.textContent).toBe(source)
+    expect(view.container.querySelector('.katex')).toBeNull()
+    view.rerender(<MarkdownText text={'$ x^2 $ and $ 2+2 $'} />)
+    expect([...view.container.querySelectorAll('annotation')].map(node => node.textContent)).toEqual(['x^2', '2+2'])
+  })
+
+  it('keeps inline math next to CJK text and double-dollar math inside a paragraph', () => {
+    const { container } = render(<MarkdownText text={'公式$x$变量，以及 $$ y $$。'} />)
+
+    expect([...container.querySelectorAll('annotation')].map(node => node.textContent)).toEqual(['x', 'y'])
+    expect(container.textContent).toContain('变量，以及')
+  })
+
+  it.each<[string, string[]]>([
+    ['$x^2 $ and $ 2+2$', ['x^2 ', ' 2+2']],
+    ['$x $ and $ y$', ['x ', ' y']],
+    ['$2 $ and $ 3$', ['2 ', ' 3']],
+    ['$2xy $ and $ 3xy$', ['2xy ', ' 3xy']],
+    ['$2 \\text{缓存} $', ['2 \\text{缓存} ']],
+  ])('preserves asymmetric formula padding without typesetting intervening prose: %s', (source, values) => {
+    const { container } = render(<MarkdownText text={source} />)
+    expect([...container.querySelectorAll('annotation')].map(node => node.textContent)).toEqual(values)
+  })
+
   it('renders inline and display TeX through KaTeX without enabling trusted commands', () => {
     const source = [
       'Einstein wrote $E = mc^2$.',
