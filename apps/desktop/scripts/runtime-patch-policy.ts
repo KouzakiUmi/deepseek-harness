@@ -8,7 +8,7 @@ export type DesktopRuntimePatch =
 
 /** Every workspace patch requires an explicit Desktop decision; runtime-only entries may add or replace a patch. */
 export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatch>> = {
-  '@earendil-works/pi-ai@1.2.0': { scope: 'shared', reason: 'Runtime providers need the streamed argument parsing fix.' },
+  '@earendil-works/pi-ai@1.3.0': { scope: 'shared', reason: 'Runtime providers need the streamed argument parsing fix.' },
   '@electron/osx-sign@1.3.3': { scope: 'workspace-only', reason: 'Signing executes on the build host.' },
   '@fortune-sheet/core@1.0.4': { scope: 'workspace-only', reason: 'Patched spreadsheet code is embedded in the client bundle.' },
   '@fortune-sheet/react@1.0.4': { scope: 'workspace-only', reason: 'Patched spreadsheet code is embedded in the client bundle.' },
@@ -22,6 +22,6 @@ export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatc
 export const DESKTOP_RUNTIME_DEPENDENCY_OVERRIDES: Readonly<Record<string, string>> = {
   '@deepseek-ai/libreoffice-kit>fflate': '0.8.3',
   'cacheable-request>http-cache-semantics': '4.3.0',
-  // The provider declares ^1.2.0; its patch is qualified against 1.2.0.
-  '@earendil-works/pi-ai@^1.2.0': '1.2.0',
+  // The provider declares ^1.3.0; its patch is qualified against 1.3.0.
+  '@earendil-works/pi-ai@^1.3.0': '1.3.0',
 }

@@ -723,8 +723,11 @@ describe('toStreamChunks', () => {
     const requested = getBuiltinModels('anthropic').find(model => model.id === requestedModel)
     if (requested === undefined) throw new Error('missing Anthropic catalog model')
     expect(transformMessages(context.messages, requested)[0]).toMatchObject({ content: native.content })
+    // pi-ai 1.3.0 drops thinking produced by another model instead of resending the readable
+    // text: a signature is valid only for the model that produced it, and readable thinking
+    // would arrive as part of the new model's visible reply.
     expect(transformMessages(context.messages, { ...requested, id: 'other-model' })[0]).toMatchObject({
-      content: [{ type: 'text', text: 'reason' }],
+      content: [],
     })
   })
 
