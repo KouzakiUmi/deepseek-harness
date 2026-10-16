@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type {
-  LlmAttemptId, LlmCallConfig, LlmFailure, MessageId, ReasoningEffortId, ResolvedRetryPolicy, StreamChunk,
+  LlmAttemptId, LlmCallConfig, LlmFailure, MessageId, PreparedLlmCall, ReasoningEffortId, ResolvedRetryPolicy, StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import type { AgentCancelCause, Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
@@ -121,6 +121,52 @@ export type PreStepDecision =
 /** Action returned by a listener that owns model-request recovery. */
 export type RequestErrorAction = { kind: 'retry' } | undefined
 
+/** Stage of one locally detected repetition episode; presentation only, never model output. */
+export type AssistantOutputStage = 'suspected' | 'released' | 'barrier'
+
+/**
+ * A provider chunk, a request to close reasoning from its already accepted
+ * deltas, or one announcement that this call's repetition detection changed
+ * stage. A stage item carries no model text and never enters the durable
+ * Assistant stream or a model request; it lets a reader learn that output is
+ * being withheld while it is checked, and that the check released it, without
+ * inventing prompt text and without inferring the decision from timing.
+ */
+export type AssistantOutputItem =
+  | StreamChunk
+  | { readonly type: 'accepted-reasoning-end'; readonly index: number }
+  | {
+    readonly type: 'reasoning-stall'
+    readonly stage: AssistantOutputStage
+    /** Original provider block index whose reasoning the stage describes. */
+    readonly index: number
+  }
+
+/** Local policy stop, distinct from provider failure and parent/user cancellation. */
+export interface AssistantOutputInterruption {
+  /** Serializable policy reason, recorded without fabricating a successful model finish. */
+  readonly failure: LlmFailure
+  /** Logged before another call in the same activity; absence leaves the interruption terminal. Read after settlement. */
+  readonly continuation?: UserMessage | undefined
+}
+
+/** One call's synchronous output policy; the loop owns cancellation and settlement. */
+export interface AssistantOutputPolicy {
+  /** Local stop decision; absent until this policy requests interruption. */
+  readonly interruption: AssistantOutputInterruption | undefined
+  /**
+   * Transform one provider chunk before accumulation, assembly, and notification.
+   * @param chunk - the original adapter chunk.
+   * @returns accepted output in arrival order; reasoning closes may reference canonical accepted text.
+   */
+  push(chunk: StreamChunk): readonly AssistantOutputItem[]
+  /**
+   * Release unresolved text; confirmed discarded copies must never return.
+   * @returns pending accepted output in arrival order.
+   */
+  flush(): readonly AssistantOutputItem[]
+}
+
 /** Why a session lifecycle began; seeded creates are `startup`, while persisted loads are `resume`. */
 export type SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact'
 
@@ -143,6 +189,17 @@ export type AssistantStreamFrame =
     /** Safe-integer timestamp reused by the durable embedded stream. */
     readonly time: number
     readonly chunk: StreamChunk
+  }
+  | {
+    readonly type: 'stage'
+    readonly attemptId: LlmAttemptId
+    readonly revision: number
+    /** Turn and Step whose repetition detection changed stage. */
+    readonly turn: number
+    readonly step: number
+    readonly stage: AssistantOutputStage
+    /** Original provider block index whose reasoning the stage describes. */
+    readonly index: number
   }
   | {
     readonly type: 'end'
@@ -335,6 +392,18 @@ declare module '@deepseek-ai/cordis' {
      * @mode waterfall
     */
     'agent/request'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal }, next: () => Promise<LlmCallConfig>): Promise<LlmCallConfig>
+    /**
+     * Select one call-local reasoning output policy before provider dispatch.
+     * Policies require the prepared call's explicit editable-plain capability.
+     * A listener calls next() to delegate; two selected policies are a configuration error.
+     * @param payload.agent - the exact agent owning the call.
+     * @param payload.turn - the open turn.
+     * @param payload.step - the current step.
+     * @param payload.preparedCall - registration-bound call, absent on a legacy LLM service.
+     * @param payload.signal - the parent turn signal; a policy must not abort it.
+     * @mode waterfall
+     */
+    'agent/output-policy'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; preparedCall: PreparedLlmCall | undefined; signal: AbortSignal }, next: () => AssistantOutputPolicy | undefined): AssistantOutputPolicy | undefined
     /**
      * Handle one failed model-request attempt before the loop retries or closes
      * its step. A listener returns `{ kind: 'retry' }` without calling `next()`

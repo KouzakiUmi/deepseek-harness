@@ -3,20 +3,41 @@ import { notifySubscribers, type ObservableSnapshot } from '@deepseek-ai/dsh-cli
 import type { LlmAttemptId, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 
-/** Client-only live chunk presentation; `seq` orders the transient row between durable Session seqs. */
+/**
+ * Client-only live presentation of one active attempt: either the next streamed
+ * chunk or one announcement that repetition detection changed stage. `seq`
+ * orders the transient row inside the open durable gap. A stage row carries no
+ * model text, is never durable, and exists so a reader learns that output is
+ * being withheld for checking, and that the check ended.
+ */
 export interface AssistantLiveChunkEvent {
   readonly type: 'assistant/live-chunk'
   readonly seq: number
   readonly time: number
-  readonly data: {
+  readonly data: AssistantLiveChunkData
+}
+
+/** Payload of one client-only live presentation row. */
+export type AssistantLiveChunkData =
+  | {
     readonly attemptId: LlmAttemptId
     readonly turn: number
     readonly step: number
     readonly chunk: StreamChunk
   }
-}
+  | {
+    readonly attemptId: LlmAttemptId
+    readonly turn: number
+    readonly step: number
+    readonly stage: SessionAssistantStreamStage
+    /** Original provider block index whose reasoning the stage describes. */
+    readonly index: number
+  }
 
-/** Current durable Session event or one client-only live chunk presentation. */
+/** Stage vocabulary carried by one live announcement; mirrors the Agent's own union. */
+export type SessionAssistantStreamStage = 'suspected' | 'released' | 'barrier'
+
+/** Current durable Session event or one client-only live presentation. */
 export type SessionEventLike = SessionEvent | AssistantLiveChunkEvent
 
 /** Client history entry retaining its coarse transport discriminator. */

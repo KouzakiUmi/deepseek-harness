@@ -14,6 +14,7 @@ import type { FinishReason, StreamChunk, TokenUsage, ToolCallId } from '@deepsee
 import { isContextOverflow } from '@earendil-works/pi-ai/utils/overflow'
 import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '@earendil-works/pi-ai'
 import { toPiReplayState } from './replay.ts'
+import { assertPlainReasoning } from './plain-reasoning.ts'
 
 /**
  * Map pi-ai usage (reasoning folded into output by pi-ai).
@@ -136,6 +137,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  * @param callerSignal - caller cancellation state; an aborted caller makes any
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
+ * @param plainReasoning - explicit mode rejecting opaque replay metadata; omitted preserves native replay.
  * @returns the harness chunks, ending with `usage` then `finish`; throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
@@ -144,12 +146,17 @@ export async function* toStreamChunks(
   contextWindow?: number,
   callerSignal?: AbortSignal,
   requestedModel?: string,
+  plainReasoning = false,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
   const toolIds = new Map<number, { id: string; name: string }>()
 
   for await (const event of events) {
+    if (plainReasoning) {
+      if ('partial' in event) assertPlainReasoning(event.partial)
+      if (event.type === 'done') assertPlainReasoning(event.message)
+    }
     switch (event.type) {
       case 'start':
         break

@@ -9,8 +9,8 @@
   en: add59e0d04eb964d
   zh: d5224b61ea4e9413
 /deepseek-ai-dsh-repeat-tool-reminder/summary:
-  en: 36ac7ba52bc4fee0
-  zh: 39894a1c067754c4
+  en: 0387a8e5a1a045ef
+  zh: eb4843c509b98a9a
 /deepseek-ai-dsh-repeat-tool-reminder/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
@@ -23,6 +23,9 @@
 /deepseek-ai-dsh-repeat-tool-reminder/use-this-package/setting-the-thresholds-and-scope:
   en: fc64919ff223096d
   zh: dd22a19eeffa9192
+/deepseek-ai-dsh-repeat-tool-reminder/use-this-package/optional-reasoning-copy-suppression:
+  en: da486f89deea0845
+  zh: 0d5b4323be86f0b3
 /deepseek-ai-dsh-repeat-tool-reminder/use-this-package/what-you-get:
   en: 5cf91a5809d2c68a
   zh: 8f60231436b863b8
@@ -39,8 +42,8 @@
   en: a3edc5c0f98b0d1e
   zh: 173f6166ce3af779
 /deepseek-ai-dsh-repeat-tool-reminder/understand-the-implementation/source-map:
-  en: ba2eb423e165510d
-  zh: db5155503a8504cb
+  en: 7cf5db0d8d025c09
+  zh: 8d50a035e66d0d85
 /deepseek-ai-dsh-repeat-tool-reminder/further-exploration:
   en: 77b646e29c1aefa8
   zh: f63b7df7412e524d
@@ -77,9 +80,21 @@
 /deepseek-ai-dsh-repeat-tool-reminder/model-experience/later-threshold-context-message/kv-cache-effect:
   en: f5d5f97a153f7c70
   zh: 51155536aab03002
+/deepseek-ai-dsh-repeat-tool-reminder/model-experience/optional-reasoning-recovery:
+  en: bbfb3a39ad5b5d57
+  zh: e78a753fa868bc44
+/deepseek-ai-dsh-repeat-tool-reminder/model-experience/optional-reasoning-recovery/what-the-model-sees:
+  en: f95f05f3a7679558
+  zh: 79d739e7144e2866
+/deepseek-ai-dsh-repeat-tool-reminder/model-experience/optional-reasoning-recovery/token-effect:
+  en: 84fffa80240e4c99
+  zh: 23d766ce6edc9bed
+/deepseek-ai-dsh-repeat-tool-reminder/model-experience/optional-reasoning-recovery/kv-cache-effect:
+  en: b50587610a8d63db
+  zh: c82cf2e1258785b4
 /deepseek-ai-dsh-repeat-tool-reminder/known-limitations-and-deferred-work:
-  en: 59ffa89bf74f8da2
-  zh: 7652f49b9eac40d6
+  en: 10c036dcfd5b914b
+  zh: c379a5edbd7c7090
 /deepseek-ai-dsh-repeat-tool-reminder/known-limitations-and-deferred-work/dev-note:
   en: ef308dcf213685c7
   zh: 5830b6bbeea9863f

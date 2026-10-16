@@ -224,6 +224,44 @@ describe('Trajectory conversation Definitions', () => {
     expect(current.requests).toMatchObject([{ status: 'running', usage: { inputTokens: 10, outputTokens: 0 } }])
   })
 
+  it('shows completion after a local interrupted prefix recovers within the same step', () => {
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/message', { turn: 1, step: 1, message: assistantMessage('guard-prefix', 'retained prefix'), interrupted: true }),
+      at(4, 'user/message', { id: 'guard-prompt', role: 'user', source: { kind: 'reasoning-loop-recovery' }, content: [{ type: 'text', text: 'continue' }] }),
+    ])
+    expect(snapshot(value).requests).toMatchObject([{ status: 'error', resultSeq: 3 }])
+    value.append(at(5, 'assistant/message', { turn: 1, step: 1, message: assistantMessage('guard-recovered', 'recovered') }))
+    value.append(at(6, 'step/end', { turn: 1, step: 1 }))
+    value.append(at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }))
+    value.flush()
+    expect(snapshot(value).requests).toMatchObject([{ status: 'complete', resultSeq: 5 }])
+  })
+
+  it('keeps the guard continuation in the audit ledger of a recovered step', () => {
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/message', { turn: 1, step: 1, message: assistantMessage('guard-prefix', 'retained prefix'), interrupted: true }),
+      at(4, 'user/message', {
+        id: 'guard-prompt', role: 'user',
+        source: { kind: 'reasoning-loop-recovery', turn: 1, step: 1, attempt: 1, limit: 3 },
+        content: [{ type: 'text', text: 'continue' }],
+      }),
+      at(5, 'assistant/message', { turn: 1, step: 1, message: assistantMessage('guard-recovered', 'recovered') }),
+      at(6, 'step/end', { turn: 1, step: 1 }),
+      at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ])
+    const current = snapshot(value)
+    // The ledger keeps the durable continuation the Step consumed; the request
+    // it resumes is the Step's single audited assistant request.
+    expect(current.eventNodes.filter(node => node.kind === 'context')).toMatchObject([
+      { source: { kind: 'reasoning-loop-recovery', attempt: 1, limit: 3 } },
+    ])
+    expect(current.requests).toMatchObject([{ purpose: 'assistant', status: 'complete', resultSeq: 5 }])
+  })
+
   it('settles an interrupted response before the step closes', () => {
     const current = snapshot(assembler([
       at(1, 'turn/start', { turn: 1 }),

@@ -8,11 +8,34 @@ import { expandAssistantStream } from '@deepseek-ai/dsh-llm/assistant-stream'
 import type { AssistantStreamRecord } from '@deepseek-ai/dsh-llm/assistant-stream'
 import type { LlmAttemptId } from '@deepseek-ai/dsh-llm/brand'
 import type {
+  AssistantLiveChunkEvent,
   SessionAssistantSettlementEntry,
+  SessionAssistantStreamStage,
   SessionEventLikeEntry,
   SessionLiveEventEntry,
   SessionTransientEventEntry,
 } from '../contract/events.ts'
+
+/**
+ * One client-only stage row for the attempt it describes.
+ * @param attemptId - attempt the stage belongs to.
+ * @param turn - durable Turn of the attempt.
+ * @param step - durable Step of the attempt.
+ * @param stage - transition the guard made.
+ * @param index - original provider block index the stage describes.
+ * @param seq - fractional seq ordering the row inside the open durable gap.
+ * @returns the transient entry appended to the client window.
+ */
+function stageEvent(
+  attemptId: LlmAttemptId,
+  turn: number,
+  step: number,
+  stage: SessionAssistantStreamStage,
+  index: number,
+  seq: number,
+): AssistantLiveChunkEvent {
+  return { type: 'assistant/live-chunk', seq, time: Date.now(), data: { attemptId, turn, step, stage, index } }
+}
 
 interface ActiveAttempt {
   readonly attemptId: LlmAttemptId
@@ -97,6 +120,16 @@ export class ClientAssistantStream {
         })
         if (index + 1 >= opening.nextIndex) break
       }
+      // The stage is the live attempt's current state, not history: a reader that
+      // reconnects while detection is withholding must see it without waiting
+      // for the next transition.
+      if (opening.stage !== undefined) visible.push({
+        type: 'transient',
+        event: stageEvent(
+          opening.attemptId, opening.turn, opening.step, opening.stage, opening.nextIndex,
+          this.durableCursor + 1 - 1 / (++this.transientInGap + 1),
+        ),
+      })
     }
     return visible
   }
@@ -164,6 +197,23 @@ export class ClientAssistantStream {
                 chunk: frame.chunk as never,
               },
             },
+          },
+        }
+      }
+      case 'stage': {
+        const attempt = this.activeAttempt
+        // A stage belongs to the attempt already streaming; an unknown attempt
+        // gets no row rather than creating one that no settlement can retire.
+        if (attempt === undefined || attempt.attemptId !== frame.attemptId) return undefined
+        this.transientInGap += 1
+        return {
+          type: 'transient',
+          entry: {
+            type: 'transient',
+            event: stageEvent(
+              frame.attemptId, attempt.turn, attempt.step, frame.stage, frame.index,
+              this.durableCursor + 1 - 1 / (this.transientInGap + 1),
+            ),
           },
         }
       }

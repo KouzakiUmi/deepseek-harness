@@ -38,6 +38,8 @@ export interface AssistantMarkdownProps extends
   streaming: boolean
   /** Frozen partial of an aborted turn: rendered with a stopped marker. */
   interrupted?: boolean | undefined
+  /** Retained prefix of a locally truncated call: rendered with a truncated marker. */
+  truncated?: boolean | undefined
   /** Hide reasoning that belongs to the Turn-level process disclosure. */
   reasoningHidden?: boolean | undefined
   /** Process hiding bound by the node slot to its current viewport. */
@@ -54,7 +56,7 @@ export interface AssistantMarkdownProps extends
 
 /** Renders non-blank reasoning blocks as independent disclosures alongside the response. */
 export const AssistantMarkdown = memo(function AssistantMarkdown({
-  blocks, streaming, interrupted, loadImage, groupPart, useDisclosure,
+  blocks, streaming, interrupted, truncated, loadImage, groupPart, useDisclosure,
   reasoningHidden = false, usePresentation, revealProcess, mentions, renderSlot, useGroupAction, t,
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
@@ -70,6 +72,7 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
   // between tool groups — skip the shell unless something visible remains.
   const hasVisible = streaming
     || interrupted === true
+    || truncated === true
     || blocks.some(block => block.kind !== 'tool-call')
   if (!hasVisible) return null
   const rendered: ReactNode[] = []
@@ -146,9 +149,9 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
     <div className={css.root} data-streaming={streaming || undefined}>
       <div className={css.body}>
         {rendered}
-        {interrupted && (groupPart === undefined || groupPart === 'response'
+        {(interrupted || truncated) && (groupPart === undefined || groupPart === 'response'
           || !blocks.some(block => block.kind !== 'reasoning' && block.kind !== 'tool-call'))
-          && <span className={css.stopped}>{t('message.stopped')}</span>}
+          && <span className={css.stopped}>{t(truncated === true ? 'message.truncated' : 'message.stopped')}</span>}
       </div>
     </div>
   )

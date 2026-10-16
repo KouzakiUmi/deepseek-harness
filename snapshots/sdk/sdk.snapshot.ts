@@ -127,6 +127,10 @@ interface SdkAssertions {
 }
 
 const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
+  'reasoning-loop-recovery': {
+    patches: [fileURLToPath(new URL('./reasoning-loop-recovery/runtime.cordis.yml', import.meta.url))],
+    expectedFinalResponse: 'Recovered.',
+  },
   'minimal-image-compaction': {
     expectedFinalResponse: 'MINIMAL_IMAGE_OK',
     expectedTools: { bash: ['command'], read_image: ['file_path'], working_directory: [] },
@@ -372,7 +376,9 @@ async function hydrateReplayFixtures(scenario: CorpusScenario, cwd: string): Pro
   await mkdir(root, { recursive: true })
   return Promise.all((await fixtureFiles(scenario)).map(async (source) => {
     const destination = join(root, basename(source))
-    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', cwd))
+    // Cwd placeholders occur inside JSON strings, including on Windows.
+    const encodedCwd = JSON.stringify(cwd).slice(1, -1)
+    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', encodedCwd))
     return destination
   }))
 }
@@ -1086,7 +1092,12 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         }
       }
       if (assertions.expectedFinalResponse !== undefined) {
-        expect(results.at(-1)?.finalResponse, `${scenario.name}: final response`).toBe(assertions.expectedFinalResponse)
+        const endings = results.at(-1)?.events.filter(event => event.type === 'turn/end' || event.type === 'assistant/message')
+          .map(event => event.type === 'assistant/message'
+            ? { type: event.type, interrupted: event.data.interrupted, blocks: event.data.message.content.map(block => block.type) }
+            : event.data)
+        expect(results.at(-1)?.finalResponse, `${scenario.name}: final response; endings=${JSON.stringify(endings)}`)
+          .toBe(assertions.expectedFinalResponse)
         const parent = ordered[0]
         if (parent === undefined) throw new Error(`${scenario.name}: no primary session log`)
         const turnEnds = records(parent.content).filter(record => record.type === 'turn/end')

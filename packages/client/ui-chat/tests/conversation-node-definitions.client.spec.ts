@@ -3,7 +3,7 @@ import type {
   ChatConversationViewNode, ChatSnapshot,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {
-  SessionEventLikeEntry, SessionLiveEventEntry,
+  SessionAssistantStreamStage, SessionEventLikeEntry, SessionLiveEventEntry,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
   ConversationNodeAssembler,
@@ -167,6 +167,406 @@ function snapshot(value: ConversationNodeAssembler): ChatSnapshot {
 function node(value: ChatSnapshot, kind: string): ChatConversationViewNode | undefined {
   return value.nodes.values().find(candidate => candidate.kind === kind)
 }
+
+const RECOVERY_SOURCE = { kind: 'reasoning-loop-recovery', turn: 1, step: 1, attempt: 1, limit: 3 }
+
+/** The durable guard round: a truncated prefix, its continuation prompt, and the resumed call. */
+function guardDurable(): SessionLiveEventEntry[] {
+  return [
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'retained prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'user/message', {
+      id: 'guard-prompt', role: 'user', source: RECOVERY_SOURCE, content: [{ type: 'text', text: 'continue' }],
+    }, { surfaceOp: 'append' }),
+    at(5, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-recovered', 'recovered'),
+    }, { surfaceOp: 'append' }),
+    at(6, 'step/end', { turn: 1, step: 1 }),
+    at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]
+}
+
+/** The same round as a live follow connection delivers it: durable events plus attempt deltas. */
+function guardLive(): SessionLiveEventEntry[] {
+  return [
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(2.4, 'assistant/live-chunk', { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'looping ' } }),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'retained prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'user/message', {
+      id: 'guard-prompt', role: 'user', source: RECOVERY_SOURCE, content: [{ type: 'text', text: 'continue' }],
+    }, { surfaceOp: 'append' }),
+    at(4.4, 'assistant/live-chunk', { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'fresh ' } }),
+    at(5, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-recovered', 'recovered'),
+    }, { surfaceOp: 'append' }),
+    at(6, 'step/end', { turn: 1, step: 1 }),
+    at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]
+}
+
+/** Append one event at a time, as the live follow path does. */
+function liveAssembler(entries: readonly SessionEventLikeEntry[], upTo: number): ChatSnapshot {
+  const value = assembler([])
+  for (const entry of entries) {
+    if (entry.event.seq > upTo) break
+    value.append(entry)
+    value.flush()
+  }
+  return snapshot(value)
+}
+
+function replayedSnapshot(entries: readonly SessionEventLikeEntry[], upTo: number): ChatSnapshot {
+  return snapshot(assembler(entries.filter(entry => entry.event.seq <= upTo)))
+}
+
+/** Assistant row facts that must not depend on how the window was loaded. */
+function assistantFacts(value: ChatSnapshot) {
+  const found = node(value, 'assistant-step')
+  const data = found?.data as AssistantChatData | undefined
+  return {
+    anchorSeq: found?.anchorSeq,
+    status: data?.status,
+    blocks: data?.blocks,
+    retained: data?.retained?.map(segment => ({
+      seq: segment.seq, interrupted: segment.interrupted, blocks: segment.blocks,
+    })),
+    recovery: data?.recovery,
+    interruption: data?.interruption,
+    stall: data?.stall,
+  }
+}
+
+/** One live detection-stage row as the follow connection publishes it. */
+function stageAt(
+  seq: number,
+  stage: SessionAssistantStreamStage,
+  attemptId = LlmAttemptId('attempt-1'),
+): SessionEventLikeEntry {
+  return {
+    type: 'transient',
+    event: {
+      type: 'assistant/live-chunk',
+      seq,
+      time: 1_700_000_000_000 + seq,
+      data: { attemptId, turn: 1, step: 1, stage, index: 0 },
+    },
+  }
+}
+
+/** One live Assistant frame as the follow connection publishes it. */
+function liveChunkAt(seq: number, chunk: unknown): SessionLiveEventEntry {
+  return at(seq, 'assistant/live-chunk', { turn: 1, step: 1, chunk })
+}
+
+it('keeps the delivered prefix and the recovery ordinal through a guard round', () => {
+  expect(assistantFacts(replayedSnapshot(guardDurable(), 7))).toEqual({
+    anchorSeq: 3,
+    status: 'settled',
+    blocks: [{ kind: 'text', text: 'recovered' }],
+    retained: [{
+      seq: 3, interrupted: true, blocks: [{ kind: 'text', text: 'retained prefix' }],
+    }],
+    recovery: { attempt: 1, limit: 3, prompt: [{ type: 'text', text: 'continue' }] },
+    interruption: undefined,
+  })
+})
+
+it('presents the same guard round to a live window and a reopened one', () => {
+  for (const upTo of [3, 4, 5, 7]) {
+    expect(assistantFacts(liveAssembler(guardLive(), upTo)))
+      .toEqual(assistantFacts(replayedSnapshot(guardDurable(), upTo)))
+  }
+})
+
+it('reports the guard cut while the provider is still being cleaned up', () => {
+  const cut = liveChunkAt(3.5, {
+    type: 'finish',
+    reason: { kind: 'error', failure: { code: 'REASONING_LOOP', message: 'Reasoning output was interrupted.' } },
+  })
+  const streaming = snapshot(assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    liveChunkAt(3, { type: 'reasoning-delta', index: 0, text: 'looping ' }),
+    cut,
+  ]))
+  // No durable settlement exists yet: the live frame is the reader's only evidence.
+  expect(assistantFacts(streaming)).toMatchObject({
+    status: 'running',
+    interruption: { code: 'REASONING_LOOP', message: 'Reasoning output was interrupted.' },
+    recovery: undefined,
+  })
+  // The frame belongs to the Step's live window: it survives re-publication.
+  const value = assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    liveChunkAt(3, { type: 'reasoning-delta', index: 0, text: 'looping ' }),
+    cut,
+    at(4, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'looping '), interrupted: true,
+    }, { surfaceOp: 'append' }),
+  ])
+  // The durable settlement owns the outcome from here on.
+  expect(assistantFacts(snapshot(value))).toMatchObject({ status: 'interrupted', interruption: undefined })
+})
+
+const SECOND_RECOVERY_SOURCE = { kind: 'reasoning-loop-recovery', turn: 1, step: 1, attempt: 2, limit: 3 }
+
+it('reports live detection stages and stops reporting them once durable facts take over', () => {
+  const live = assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    liveChunkAt(2.5, { type: 'reasoning-delta', index: 0, text: 'thinking ' }),
+    stageAt(2.6, 'suspected'),
+  ])
+  expect(assistantFacts(snapshot(live))).toMatchObject({ status: 'running', stall: 'suspected' })
+  live.append(stageAt(2.7, 'released'))
+  live.flush()
+  expect(assistantFacts(snapshot(live)).stall).toBe('released')
+  // A durable settlement plus its continuation replace the stage with real facts.
+  live.append(at(3, 'assistant/message', {
+    turn: 1, step: 1, message: assistantMessage('guard-prefix', 'thinking '), interrupted: true,
+  }, { surfaceOp: 'append' }))
+  live.flush()
+  expect(assistantFacts(snapshot(live)).stall).toBeUndefined()
+  live.append(at(4, 'user/message', {
+    id: 'guard-prompt', role: 'user', source: RECOVERY_SOURCE, content: [{ type: 'text', text: 'continue' }],
+  }, { surfaceOp: 'append' }))
+  live.flush()
+  expect(assistantFacts(snapshot(live))).toMatchObject({
+    status: 'running', stall: undefined, recovery: { attempt: 1, limit: 3 },
+  })
+})
+
+it('reopening a window keeps the durable rows and never invents a stage', () => {
+  const durable: SessionLiveEventEntry[] = [
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'first prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'user/message', {
+      id: 'guard-prompt', role: 'user', source: RECOVERY_SOURCE, content: [{ type: 'text', text: 'continue' }],
+    }, { surfaceOp: 'append' }),
+    at(5, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('answer', 'final answer'),
+    }, { surfaceOp: 'append' }),
+    at(6, 'step/end', { turn: 1, step: 1 }),
+    at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]
+  const reopened = snapshot(assembler(durable))
+  expect(assistantFacts(reopened)).toMatchObject({
+    status: 'settled',
+    stall: undefined,
+    recovery: { attempt: 1, limit: 3 },
+  })
+  expect((assistantFacts(reopened) as { retained?: unknown[] }).retained).toHaveLength(1)
+  // The durable continuation row survives the reopen.
+  expect(node(reopened, 'context')?.data).toMatchObject({ source: { kind: 'reasoning-loop-recovery' } })
+})
+
+it('retires a stage row with its attempt without dropping the durable prompt or prefix', () => {
+  const attempt = LlmAttemptId('attempt-1')
+  const value = assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    stageAt(2.5, 'suspected', attempt),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'first prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'user/message', {
+      id: 'guard-prompt', role: 'user', source: RECOVERY_SOURCE, content: [{ type: 'text', text: 'continue' }],
+    }, { surfaceOp: 'append' }),
+  ])
+  // The client retires the attempt's transient rows, then the durable settlement publishes.
+  value.settleAssistant(attempt)
+  value.append(at(5, 'assistant/message', {
+    turn: 1, step: 1, message: assistantMessage('answer', 'final answer'),
+  }, { surfaceOp: 'append' }))
+  value.flush()
+  const settled = snapshot(value)
+  expect(assistantFacts(settled).stall).toBeUndefined()
+  expect((assistantFacts(settled) as { retained?: unknown[] }).retained).toHaveLength(1)
+  expect(node(settled, 'context')?.data).toMatchObject({ source: { kind: 'reasoning-loop-recovery' } })
+})
+
+it('reports a second cut of the same Step instead of its earlier recovery', () => {
+  const secondCut = liveChunkAt(5.5, {
+    type: 'finish',
+    reason: { kind: 'error', failure: { code: 'REASONING_LOOP', message: 'cut again' } },
+  })
+  const guarded = (entry: SessionLiveEventEntry): readonly SessionEventLikeEntry[] => entry.event.seq === 6
+    ? [secondCut, entry]
+    : [entry]
+  const entries: SessionEventLikeEntry[] = [
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('prefix-1', 'first prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'user/message', {
+      id: 'guard-1', role: 'user', source: RECOVERY_SOURCE, content: [{ type: 'text', text: 'continue' }],
+    }, { surfaceOp: 'append' }),
+    at(6, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('prefix-2', 'second prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(7, 'user/message', {
+      id: 'guard-2', role: 'user', source: SECOND_RECOVERY_SOURCE, content: [{ type: 'text', text: 'continue again' }],
+    }, { surfaceOp: 'append' }),
+    at(8, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('answer', 'final answer'),
+    }, { surfaceOp: 'append' }),
+    at(9, 'step/end', { turn: 1, step: 1 }),
+    at(10, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ].flatMap(entry => guarded(entry))
+
+  const live = assembler([])
+  const seen: Record<number, unknown> = {}
+  for (const entry of entries) {
+    live.append(entry)
+    live.flush()
+    if ([4, 5.5, 6, 7, 8, 9, 10].includes(entry.event.seq)) seen[entry.event.seq] = assistantFacts(snapshot(live))
+  }
+  // The first continuation is presented until the guard cuts the resumed call.
+  expect(seen[4]).toMatchObject({ status: 'running', recovery: { attempt: 1, limit: 3 } })
+  // A cut that just happened outranks the recovery this Step already consumed.
+  expect(seen[5.5]).toMatchObject({ interruption: { code: 'REASONING_LOOP', message: 'cut again' } })
+  // Its own settlement still reports the earlier ordinal until the next continuation arrives.
+  expect(seen[6]).toMatchObject({ status: 'interrupted', interruption: undefined, recovery: { attempt: 1 } })
+  expect((seen[6] as { retained?: unknown[] }).retained).toHaveLength(1)
+  // The second continuation retains the second prefix and reports the new ordinal.
+  expect(seen[7]).toMatchObject({ status: 'running', recovery: { attempt: 2, limit: 3 }, interruption: undefined })
+  expect((seen[7] as { retained?: unknown[] }).retained).toHaveLength(2)
+  expect(seen[8]).toMatchObject({ status: 'settled', recovery: { attempt: 2 }, interruption: undefined })
+  expect((seen[8] as { retained?: unknown[] }).retained).toHaveLength(2)
+  // Reopening the same window reaches the same row.
+  expect(assistantFacts(replayedSnapshot(entries, 10))).toEqual(seen[10])
+})
+
+it('leaves no running cut when the Step closes without a settlement', () => {
+  const cut = liveChunkAt(3.5, {
+    type: 'finish',
+    reason: { kind: 'error', failure: { code: 'REASONING_LOOP', message: 'held prefix was empty' } },
+  })
+  const entries: SessionEventLikeEntry[] = [
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    liveChunkAt(3, { type: 'reasoning-delta', index: 0, text: 'held ' }),
+    cut,
+    at(4, 'assistant/attempt', { turn: 1, step: 1, stream: [] }),
+    at(5, 'step/end', { turn: 1, step: 1 }),
+    at(6, 'turn/end', {
+      turn: 1,
+      reason: { kind: 'error', error: { code: 'REASONING_LOOP', message: 'Reasoning output was interrupted.' } },
+    }),
+  ]
+  const live = assembler([])
+  const seen: unknown[] = []
+  for (const entry of entries) {
+    live.append(entry)
+    live.flush()
+    seen.push(assistantFacts(snapshot(live)).interruption)
+  }
+  // The cut is visible while the call is still open, and the closed Step owns the outcome.
+  expect(seen[3]).toMatchObject({ code: 'REASONING_LOOP' })
+  expect(seen[6]).toBeUndefined()
+  const current = snapshot(live)
+  expect(assistantFacts(current).interruption).toBeUndefined()
+  expect(node(current, 'turn-error')?.data).toMatchObject({ code: 'REASONING_LOOP' })
+})
+
+it('keeps a prefix readable when the log records no Step for its continuation', () => {
+  const value = snapshot(assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'retained prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'user/message', {
+      id: 'guard-prompt', role: 'user', source: { kind: 'reasoning-loop-recovery' }, content: [{ type: 'text', text: 'continue' }],
+    }, { surfaceOp: 'append' }),
+    at(5, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-recovered', 'recovered'),
+    }, { surfaceOp: 'append' }),
+  ]))
+  // Without the recorded Step the guard's ordinal is unknown, so the row keeps
+  // the durable presentation and still retains the prefix it replaced.
+  expect(assistantFacts(value)).toMatchObject({
+    status: 'settled',
+    blocks: [{ kind: 'text', text: 'recovered' }],
+    retained: [{ seq: 3, interrupted: true, blocks: [{ kind: 'text', text: 'retained prefix' }] }],
+    recovery: undefined,
+    interruption: undefined,
+  })
+  // The continuation itself stays visible as durable context.
+  expect(node(value, 'context')?.data).toMatchObject({ source: { kind: 'reasoning-loop-recovery' } })
+})
+
+it('reports no truncation for a provider failure or a normal finish', () => {
+  for (const reason of [
+    { kind: 'stop' },
+    { kind: 'error', failure: { code: 'SERVER_ERROR', message: 'provider failed' } },
+  ] as const) {
+    const value = snapshot(assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      liveChunkAt(3, { type: 'text-delta', index: 0, text: 'partial' }),
+      liveChunkAt(3.5, { type: 'finish', reason }),
+    ]))
+    expect(assistantFacts(value).interruption).toBeUndefined()
+  }
+})
+
+it('returns the Step to a running presentation as soon as the guard continues it', () => {
+  // Before the continuation, the truncated settlement is the Step's last word.
+  expect(assistantFacts(replayedSnapshot(guardDurable(), 3)).status).toBe('interrupted')
+  // The continuation itself is enough: no resumed chunk has arrived yet.
+  const continuing = assistantFacts(replayedSnapshot(guardDurable(), 4))
+  expect(continuing.status).toBe('running')
+  expect(continuing.blocks).toEqual([])
+  expect(continuing.retained).toHaveLength(1)
+  expect(continuing.recovery).toMatchObject({ attempt: 1, limit: 3 })
+})
+
+it('keeps the stopped presentation when nothing continues the interrupted Step', () => {
+  const stopped = assistantFacts(snapshot(assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'retained prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'step/end', { turn: 1, step: 1 }),
+    at(5, 'turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } }),
+  ])))
+  expect(stopped.status).toBe('interrupted')
+  expect(stopped.retained).toBeUndefined()
+  expect(stopped.recovery).toBeUndefined()
+})
+
+it('reports the exhausted recovery budget as the Turn terminal error', () => {
+  const value = assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1, step: 1, message: assistantMessage('guard-prefix', 'retained prefix'), interrupted: true,
+    }, { surfaceOp: 'append' }),
+    at(4, 'step/end', { turn: 1, step: 1 }),
+    at(5, 'turn/end', {
+      turn: 1,
+      reason: { kind: 'error', error: { code: 'REASONING_LOOP', message: 'Reasoning output was interrupted after sustained exact-copy repetition.' } },
+    }),
+  ])
+  const current = snapshot(value)
+  expect(assistantFacts(current).status).toBe('interrupted')
+  expect(node(current, 'turn-error')?.data).toMatchObject({
+    code: 'REASONING_LOOP', message: 'Reasoning output was interrupted after sustained exact-copy repetition.',
+  })
+})
 
 function promptNodes(value: ChatSnapshot): ChatConversationViewNode[] {
   const prompts = value.nodes.values().filter(candidate => candidate.kind === 'system-prompt')

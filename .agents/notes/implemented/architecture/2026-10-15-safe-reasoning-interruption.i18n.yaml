@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-15-safe-reasoning-interruption.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-15-safe-reasoning-interruption.md
+/agent-note-reasoning-policies-commit-safe-output-before-bounded-recovery:
+  en: 2b4dc751c1753dd4
+  zh: 2e3bb4aa1da73425
+/agent-note-reasoning-policies-commit-safe-output-before-bounded-recovery/problem:
+  en: 66fe33d5b135ae26
+  zh: 2315537e6c30e8b9
+/agent-note-reasoning-policies-commit-safe-output-before-bounded-recovery/decision:
+  en: 8170ff96ab4d6d89
+  zh: d926ec3fd67d8d00
+/agent-note-reasoning-policies-commit-safe-output-before-bounded-recovery/alternatives-considered:
+  en: 1480954ebc6cefcc
+  zh: 16f1c7cfce6b8482
+/agent-note-reasoning-policies-commit-safe-output-before-bounded-recovery/consequences:
+  en: 36fded9173f04b60
+  zh: 6a0119ea023979a0
+/agent-note-reasoning-policies-commit-safe-output-before-bounded-recovery/verification:
+  en: e4fbac0c0a2453f8
+  zh: 70dfddc9a0726ba6

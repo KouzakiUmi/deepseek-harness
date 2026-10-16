@@ -12,6 +12,8 @@ Status: implemented
 
 ## Decision
 
+[输出策略决策](2026-10-15-safe-reasoning-interruption.zh.md)部分替代本决策中将中断前缀结算限定为用户取消的限制。此处的用户取消行为与普通提供方失败处理继续有效。
+
 `ReactLoopAgent.step()` 在消费模型 stream 期间捕捉取消，此时 `BlockAssembler`、紧凑 stream accumulator 与 provider route 可以确定已送达前缀。loop 把该前缀追加为 step 的 `assistant/message`，并设置 `interrupted: true`、`surfaceOp: 'append'` 与精确嵌入式带时间 stream。该追加先于 committed `agent/assistant-stream` end frame、`step/end` 和记录 aborted 的 `turn/end`。
 
 `BlockAssembler.interruptedBlocks()` 按 stream 顺序返回内容非空白的已闭合和未闭合 `text` 与 `reasoning` block。打断先于分派，没有真实工具结果，因此它会省略工具调用，也会省略空 block 和未闭合的未知 block 类型。返回结果为空时追加 `assistant/attempt`，而不是 surface message。Provider `error` 与 `aborted` finish 也会在 `agent/request-error` 前提交 `assistant/attempt`，因此其 stream 保持持久，但失败请求内容不会进入模型历史。

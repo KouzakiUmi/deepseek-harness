@@ -89,6 +89,58 @@ describe('bundleRoster on a scratch installation', () => {
     expect(linked.roster(['@t/base', '@t/linked'])).toEqual(['@t/theme'])
   })
 
+  it('resolves a bundle that lists itself without a dependency link into its own directory', () => {
+    const linked = new Scratch()
+    onTestFinished(() => { rmSync(linked.root, { recursive: true, force: true }) })
+    // A workspace bundle lives outside node_modules and is reachable only through
+    // a link, so a dependency search from its realpath cannot find the bundle
+    // itself. Its own manifest identity answers that row instead.
+    const bundle = join(linked.root, 'packages', 'web-app')
+    mkdirSync(bundle, { recursive: true })
+    writeFileSync(join(bundle, 'package.json'), JSON.stringify({
+      name: '@t/web-app',
+      dsh: { bundle: { patch: ['./cordis.patch.yml'] } },
+    }))
+    writeFileSync(join(bundle, 'cordis.patch.yml'), [
+      '- insert:',
+      '    - id: self',
+      "      name: '@t/web-app'",
+      '    - id: theme',
+      "      name: '@t/theme'",
+    ].join(String.fromCharCode(10)))
+    // The bundle's own dependency directory holds its browser sibling, exactly as
+    // a package manager links a workspace package's declared dependencies.
+    const theme = join(bundle, 'node_modules', '@t', 'theme')
+    mkdirSync(theme, { recursive: true })
+    writeFileSync(join(theme, 'package.json'), JSON.stringify({ name: '@t/theme', dsh: { client: { platform: 'web' } } }))
+    mkdirSync(join(linked.root, 'app', 'node_modules', '@t'), { recursive: true })
+    symlinkSync(bundle, join(linked.root, 'app', 'node_modules', '@t', 'web-app'), 'junction')
+    // The self row resolves and, being Host-only, drops; the browser sibling
+    // proves the layer composed.
+    expect(linked.roster(['@t/web-app'])).toEqual(['@t/theme'])
+  })
+
+  it('does not accept an anchor whose manifest names another package for a self row', () => {
+    const linked = new Scratch()
+    onTestFinished(() => { rmSync(linked.root, { recursive: true, force: true }) })
+    const bundle = join(linked.root, 'packages', 'web-app')
+    mkdirSync(bundle, { recursive: true })
+    // Manifest identity, not the requested row name, decides the shortcut: the
+    // row still goes through ordinary dependency search and fails loud.
+    writeFileSync(join(bundle, 'package.json'), JSON.stringify({
+      name: '@t/real-web-app',
+      dsh: { bundle: { patch: ['./cordis.patch.yml'] } },
+    }))
+    writeFileSync(join(bundle, 'cordis.patch.yml'), [
+      '- insert:',
+      '    - id: self',
+      "      name: '@t/web-app'",
+    ].join(String.fromCharCode(10)))
+    mkdirSync(join(linked.root, 'app', 'node_modules', '@t'), { recursive: true })
+    symlinkSync(bundle, join(linked.root, 'app', 'node_modules', '@t', 'web-app'), 'junction')
+    expect(() => linked.roster(['@t/web-app'])).toThrow('cannot resolve plugin package @t/web-app from @t/web-app')
+  })
+
   it('applies the layers in order and keeps enabled browser rows once, with their dsh.client declaration', () => {
     scratch.web('@t/a', { inject: ['@t/b'], immediately: true })
     scratch.web('@t/b')
@@ -313,8 +365,12 @@ it('exhausts uneven linked-bundle search paths before reporting a missing plugin
   const bundle = join(scratch.root, 'workspace', 'nested', 'deeper', 'bundle')
   mkdirSync(bundle, { recursive: true })
   writeFileSync(join(bundle, 'package.json'), JSON.stringify({ name: '@t/deep', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
-  writeFileSync(join(bundle, 'cordis.patch.yml'), "- insert:\n    - id: missing\n      name: '@t/absent'\n")
-  scratch.bundle('@t/base', '- insert: []\n')
+  writeFileSync(join(bundle, 'cordis.patch.yml'), [
+    '- insert:',
+    '    - id: missing',
+    "      name: '@t/absent'",
+  ].join(String.fromCharCode(10)))
+  scratch.bundle('@t/base', '- insert: []' + String.fromCharCode(10))
   symlinkSync(bundle, join(scratch.root, 'app', 'node_modules', '@t', 'deep'), 'junction')
   expect(() => scratch.roster(['@t/base', '@t/deep'])).toThrow('cannot resolve plugin package @t/absent')
 })

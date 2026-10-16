@@ -76,7 +76,6 @@ function summarize(session: Session, firstSeq: SessionLogOffset): RunOutcome {
   let reason: SessionEvent<'turn/end'>['data']['reason'] | undefined
   const length = session.seq
   for (let seq = firstSeq; seq < length; seq++) {
-    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     const event = session.eventAt(SessionSeq(seq))
     if (event === undefined) {
       throw new Error(`headless summary cannot read seq ${String(seq)} below captured length ${String(length)}`)
@@ -129,6 +128,9 @@ function streamReasoning(
       close()
       return
     }
+    // A detection stage is presentation only: the terminal transcript carries
+    // model output, not the guard's withholding state.
+    if (frame.type === 'stage') return
     const chunk = frame.chunk
     switch (chunk.type) {
       case 'reasoning-delta':
@@ -176,7 +178,6 @@ interface AdoptableHeader {
 function* liveEvents(session: Session): Generator<SessionEvent> {
   const length = session.seq
   for (let seq = 0; seq < length; seq++) {
-    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     const event = session.eventAt(SessionSeq(seq))
     if (event === undefined) {
       throw new Error(`headless adoption cannot read seq ${String(seq)} below captured length ${String(length)}`)

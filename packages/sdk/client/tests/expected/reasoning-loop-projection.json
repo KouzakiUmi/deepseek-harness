@@ -1,0 +1,7 @@
+{
+  "finalResponse": "Recovered.",
+  "partialBlockTypes": ["reasoning"],
+  "partialFailureCode": "REASONING_LOOP",
+  "continuationSource": "reasoning-loop-recovery",
+  "turnReasons": ["completed"]
+}

@@ -3,6 +3,7 @@ import type {
   ConversationLocation, ConversationViewNode, ModelRetryNode, RunningToolCall,
   ToolCallBlock,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ChatGroupTree } from './group-tree.ts'
 
 /** Final Chat render unit produced by a Chat business Definition. */
@@ -43,6 +44,45 @@ export interface AssistantChatData {
   readonly time: number
   readonly usage?: unknown
   readonly finalNode?: AssistantMessageNode
+  /**
+   * Settlements this Step delivered before the current attempt, oldest first.
+   * A locally interrupted call whose prefix was already shown keeps it here, so
+   * the continuing attempt never replaces content the reader has seen.
+   */
+  readonly retained?: readonly AssistantMessageNode[]
+  /** Locally interrupted call this Step continues, when one was detected. */
+  readonly recovery?: AssistantRecoveryChatData
+  /**
+   * Failure that cut the running call before its durable settlement existed.
+   * Present only while a locally interrupted call has not settled yet.
+   */
+  readonly interruption?: AssistantInterruptionChatData
+  /**
+   * Latest withholding stage the live attempt reported. Live state only: a
+   * reopened window derives its row from durable events and carries no stage.
+   */
+  readonly stall?: AssistantStallStage
+}
+
+/** Stage of one live repetition-check episode this Step reported. */
+export type AssistantStallStage = 'suspected' | 'released' | 'barrier'
+
+/** Local cut of a running Assistant call, reported before its settlement exists. */
+export interface AssistantInterruptionChatData {
+  /** Stable failure code the cutting policy recorded. */
+  readonly code?: string
+  /** Sanitized failure account; never a credential or provider payload. */
+  readonly message: string
+}
+
+/** Durable facts of the continuation that resumes a locally interrupted call. */
+export interface AssistantRecoveryChatData {
+  /** One-based recovery ordinal the producer recorded, when the log carries it. */
+  readonly attempt?: number
+  /** Recoveries one Turn may start, when the log carries it. */
+  readonly limit?: number
+  /** Continuation prompt exactly as the model received it. */
+  readonly prompt: readonly ContentBlock[]
 }
 
 /** Settled or interrupted Assistant payload with its durable presentation node. */

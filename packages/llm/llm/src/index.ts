@@ -179,6 +179,8 @@ export interface PreparedLlmCall {
   readonly systemPromptUpdate?: SystemPromptUpdate
   /** Exact model tool update mode captured with the adapter dispatch generation. */
   readonly toolUpdate?: ToolUpdate
+  /** Reasoning editing/replay capability from the same adapter generation; absent means unknown. */
+  readonly reasoningReplay?: LlmResolvedModelInfo['reasoningReplay']
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
   /**
@@ -817,6 +819,10 @@ export class LlmRuntime extends TypertRemoteService {
         'INVALID_MODEL_INFO',
       )
     }
+    const reasoningReplay: string | undefined = resolved.reasoningReplay
+    if (reasoningReplay !== undefined && reasoningReplay !== 'editable-plain' && reasoningReplay !== 'opaque') {
+      throw new LlmError(`adapter returned invalid reasoning replay capability for provider "${provider}" model "${model}"`, 'INVALID_MODEL_INFO')
+    }
     const defaultMaxTokens = resolved.defaultMaxTokens
     if (defaultMaxTokens !== undefined
       && (!Number.isSafeInteger(defaultMaxTokens) || defaultMaxTokens <= 0)) {
@@ -835,6 +841,7 @@ export class LlmRuntime extends TypertRemoteService {
       ...defaultMaxTokens === undefined ? {} : { defaultMaxTokens },
       ...resolved.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: resolved.systemPromptUpdate },
       ...resolved.toolUpdate === undefined ? {} : { toolUpdate: resolved.toolUpdate },
+      ...resolved.reasoningReplay === undefined ? {} : { reasoningReplay: resolved.reasoningReplay },
     }
     const reasoning = resolved.reasoning
     if (reasoning === undefined) return info
@@ -992,6 +999,7 @@ export class LlmRuntime extends TypertRemoteService {
         : { inputModalities: Object.freeze([...modelInfo.inputModalities]) },
       ...modelInfo.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: modelInfo.systemPromptUpdate },
       ...modelInfo.toolUpdate === undefined ? {} : { toolUpdate: modelInfo.toolUpdate },
+      ...modelInfo.reasoningReplay === undefined ? {} : { reasoningReplay: modelInfo.reasoningReplay },
       stream: (options: GenerateOptions): AsyncIterable<StreamChunk> => {
         if (dispatched) {
           throw new LlmError('a prepared LLM call can only be dispatched once', 'INVALID_PREPARED_CALL')

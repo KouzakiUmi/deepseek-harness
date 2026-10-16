@@ -16,6 +16,7 @@ interface MutableAttempt {
   readonly step: number
   readonly stream: AssistantStreamAccumulator
   nextIndex: number
+  stage: SessionAssistantStreamAttempt['stage']
 }
 
 const EMPTY_BASELINE: SessionAssistantStreamBaseline = { revision: 0 }
@@ -56,6 +57,7 @@ export class SessionAssistantStreamAccumulator {
           step: frame.step,
           stream: new AssistantStreamAccumulator(),
           nextIndex: 0,
+          stage: undefined,
         }
         break
       case 'chunk': {
@@ -68,6 +70,13 @@ export class SessionAssistantStreamAccumulator {
         }
         attempt.stream.push({ time: frame.time, chunk: frame.chunk })
         attempt.nextIndex += 1
+        break
+      }
+      case 'stage': {
+        const attempt = this.activeAttempt
+        // A stage describes the attempt already streaming; it neither opens nor
+        // closes one, and it is never part of the durable stream.
+        if (attempt !== undefined && attempt.attemptId === frame.attemptId) attempt.stage = frame.stage
         break
       }
       case 'end':
@@ -93,6 +102,7 @@ export class SessionAssistantStreamAccumulator {
           step: this.activeAttempt.step,
           nextIndex: this.activeAttempt.nextIndex,
           stream: this.activeAttempt.stream.snapshot() as unknown as readonly JsonValue[],
+          ...this.activeAttempt.stage === undefined ? {} : { stage: this.activeAttempt.stage },
         },
       },
     }

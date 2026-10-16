@@ -11,7 +11,7 @@ import {
   type StreamChunk,
   type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
-import type { AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
+import type { AssistantOutputItem, AssistantOutputStage, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import type { SessionEventMap, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 
 /** Folds one model attempt into one compact stream plus ordered transient frames. */
@@ -53,6 +53,41 @@ export class AssistantStreamAttempt {
       revision: this.nextRevision(),
       turn: this.turn,
       step: this.step,
+    })
+  }
+
+  /**
+   * Commit one filtered item; reasoning closes use the same accepted text as live
+   * deltas, and a detection stage is published without entering this attempt's
+   * durable stream, assembled message, or any model request.
+   * @param item - accepted provider chunk, reasoning-close directive, or detection stage.
+   */
+  accept(item: AssistantOutputItem): void {
+    if (item.type === 'reasoning-stall') {
+      this.stage(item.stage, item.index)
+      return
+    }
+    this.push(item.type === 'accepted-reasoning-end'
+      ? { type: 'block-end', index: item.index, block: this.assembler.acceptedReasoning(item.index) }
+      : item)
+  }
+
+  /**
+   * Publish one withholding transition of this attempt. The frame is
+   * process-local presentation: it never reaches the durable stream.
+   * @param stage - transition the output policy made.
+   * @param index - original provider block index the stage describes.
+   */
+  stage(stage: AssistantOutputStage, index: number): void {
+    if (this.terminal) return
+    this.emit({
+      type: 'stage',
+      attemptId: this.attemptId,
+      revision: this.nextRevision(),
+      turn: this.turn,
+      step: this.step,
+      stage,
+      index,
     })
   }
 

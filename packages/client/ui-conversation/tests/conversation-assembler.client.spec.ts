@@ -676,7 +676,7 @@ describe('ConversationNodeAssembler', () => {
           ...context.state,
           updates: [
             ...context.state.updates,
-            `transient:${String(match.event.seq)}:${match.event.data.chunk.type}`,
+            `transient:${String(match.event.seq)}:${'chunk' in match.event.data ? match.event.data.chunk.type : match.event.data.stage}`,
           ],
           transientStatus: match.location.kind === 'step'
             ? match.location.step.status
@@ -1217,7 +1217,8 @@ describe('ConversationNodeAssembler', () => {
     const source: ConversationNodeDefinition<number> = {
       kind: 'reindexed-source',
       match: (event) => {
-        if (event.type === 'assistant/live-chunk' && event.data.chunk.type === 'tool-call-delta') {
+        if (event.type === 'assistant/live-chunk' && 'chunk' in event.data
+          && event.data.chunk.type === 'tool-call-delta') {
           return { id: String(event.data.chunk.id), role: 'start' }
         }
         return event.type === 'tool/call' ? { id: String(event.data.callId), role: 'start' } : null

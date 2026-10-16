@@ -424,8 +424,18 @@ export type SystemPromptUpdate = 'in-history'
  */
 export type ToolUpdate = 'in-history' | 'addition-only'
 
+/**
+ * Whether an adapter permits editing reasoning before durable delivery.
+ * `editable-plain` guarantees append-complete reasoning deltas, replay metadata
+ * independent of reasoning bytes (including tool metadata), and safe replay of
+ * an interrupted reasoning-only prefix. `opaque` forbids edits. Omission is unknown.
+ */
+export type ReasoningReplayCapability = 'editable-plain' | 'opaque'
+
 /** Exact-route model metadata resolved by its owning adapter. */
 export interface LlmResolvedModelInfo extends LlmModelInfo {
+  /** Editing and partial-history replay capability captured with this exact dispatch generation. */
+  reasoningReplay?: ReasoningReplayCapability
   /** Provider-owned context capacity when known. */
   context?: LlmModelContext
   /** Adapter-configured per-request output cap materialized when callers omit one. */

@@ -120,6 +120,20 @@ export class BlockAssembler {
     }
   }
 
+  /**
+   * Read reasoning already accepted at an index without copying a second text history.
+   * @param index - original provider block index.
+   * @returns the current reasoning block; missing indexes are empty reasoning.
+   * @throws when the index belongs to another block type.
+   */
+  acceptedReasoning(index: number): Extract<ContentBlock, { type: 'reasoning' }> {
+    const partial = this.partials.get(index)
+    if (partial === undefined) return { type: 'reasoning', text: '' }
+    const block = this.assemble(partial, index)
+    if (block.type !== 'reasoning') throw new Error('accepted reasoning end targets a non-reasoning block')
+    return block
+  }
+
   /** Invariant accessor: every index in `order` has a partial. */
   private mustGet(index: number): PartialBlock {
     const partial = this.partials.get(index)

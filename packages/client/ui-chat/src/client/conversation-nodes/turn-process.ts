@@ -60,7 +60,7 @@ function visibleChunk(chunk: StreamChunk): boolean {
 }
 
 function visibleAssistantEvent(event: ConversationEvent): boolean {
-  if (event.type === 'assistant/live-chunk') return visibleChunk(event.data.chunk)
+  if (event.type === 'assistant/live-chunk') return 'chunk' in event.data && visibleChunk(event.data.chunk)
   if (event.type === 'assistant/attempt') return false
   return event.type === 'assistant/message'
     && event.surfaceOp === 'append'
@@ -239,6 +239,7 @@ export const turnProcessDefinition: ConversationNodeDefinition<TurnProcessState>
   update: (context, match) => updateProcessState(context.state, match.event),
   publication: (match) => {
     if (match.event.type === 'assistant/live-chunk') {
+      if (!('chunk' in match.event.data)) return 'immediate'
       const type = match.event.data.chunk.type
       return type === 'usage' || type === 'finish' ? 'none' : 'animation-frame'
     }

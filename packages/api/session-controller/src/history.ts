@@ -153,7 +153,6 @@ export class SessionHistoryController {
       // Constructor seed events have no session/event notification. Normally
       // only the end-seed suffix is new; if persistence advanced after the
       // opening observation, replay everything beyond that snapshot cursor.
-      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       const suffix = session.snapshotEvents(snapshotCursor === undefined
         ? session.firstLiveSeq
         : SessionLogOffset(snapshotCursor + 1))
@@ -285,11 +284,10 @@ function wireAssistantStreamFrame(
   durableCursor: SessionSeqCursor,
 ): SessionAssistantStreamFrame {
   if (frame.type === 'start') return { ...frame, startedAfterSeq: durableCursor }
-  if (frame.type === 'end') return frame
-  return {
-    ...frame,
-    chunk: frame.chunk as JsonValue,
-  }
+  if (frame.type === 'chunk') return { ...frame, chunk: frame.chunk as JsonValue }
+  // A stage frame crosses unchanged; this assignment also proves the wire
+  // vocabulary still covers every stage the agent can emit.
+  return frame
 }
 
 function projectionBlock(

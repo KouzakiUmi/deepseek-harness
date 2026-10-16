@@ -519,7 +519,21 @@ export interface SessionAssistantStreamAttempt {
   readonly nextIndex: number
   /** Compact detached stream accumulated at this opening revision. */
   readonly stream: readonly JsonValue[]
+  /**
+   * Withholding stage this attempt currently reports, when detection last
+   * changed it. Presentation state of the live attempt, not durable history:
+   * a settled attempt carries no stage.
+   */
+  readonly stage?: SessionAssistantOutputStage
 }
+
+/**
+ * Wire mirror of `AssistantOutputStage` in `@deepseek-ai/dsh-agent`, declared
+ * structurally so this vocabulary stays browser-safe. The host conversion
+ * assigns the agent's own union to this one, so a new stage value fails
+ * compilation rather than silently dropping out of the wire form.
+ */
+export type SessionAssistantOutputStage = 'suspected' | 'released' | 'barrier'
 
 /** Complete process-local assistant state at one follow opening. */
 export interface SessionAssistantStreamBaseline {
@@ -544,6 +558,16 @@ export type SessionAssistantStreamFrame =
     readonly index: number
     readonly time: number
     readonly chunk: JsonValue
+  }
+  | {
+    readonly type: 'stage'
+    readonly attemptId: LlmAttemptId
+    readonly revision: number
+    readonly turn: number
+    readonly step: number
+    readonly stage: SessionAssistantOutputStage
+    /** Original provider block index whose reasoning the stage describes. */
+    readonly index: number
   }
   | {
     readonly type: 'end'

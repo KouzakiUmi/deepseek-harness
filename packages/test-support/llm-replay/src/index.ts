@@ -107,6 +107,8 @@ export interface ReplayModelConfig {
   systemPromptUpdate?: SystemPromptUpdate
   /** Optional mid-conversation tool declaration mode for a keyless replay route. */
   toolUpdate?: ToolUpdate
+  /** Explicit reasoning editing/replay capability for output-policy scenarios; absent remains unknown. */
+  reasoningReplay?: LlmResolvedModelInfo['reasoningReplay']
 }
 
 /** One provider route exposed by the replay adapter. */
@@ -927,6 +929,7 @@ class ReplayAdapter extends LlmAdapter {
       ...configuredModel?.toolUpdate === undefined
         ? {}
         : { toolUpdate: configuredModel.toolUpdate },
+      ...configuredModel?.reasoningReplay === undefined ? {} : { reasoningReplay: configuredModel.reasoningReplay },
       ...configuredModel?.reasoningEfforts === undefined
         ? {}
         : {
@@ -1177,6 +1180,10 @@ function validateConfiguredModels(providers: ReplayProviderConfig[] | undefined)
           `llm-replay: provider "${provider.id}" model "${model.id}" systemPromptUpdate `
           + 'must be "in-history" when present',
         )
+      }
+      const reasoningReplay: unknown = model.reasoningReplay
+      if (reasoningReplay !== undefined && reasoningReplay !== 'editable-plain' && reasoningReplay !== 'opaque') {
+        throw new Error(`llm-replay: provider "${provider.id}" model "${model.id}" reasoningReplay must be "editable-plain" or "opaque" when present`)
       }
       const toolUpdate: unknown = model.toolUpdate
       if (toolUpdate !== undefined && toolUpdate !== 'in-history' && toolUpdate !== 'addition-only') {

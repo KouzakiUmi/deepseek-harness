@@ -133,6 +133,33 @@ describe('normalizeStdout', () => {
     expect(frame).toEqual({ cwd: '{{cwd}}', path: '{{cwd}}/nested/proof.txt' })
   })
 
+  it('scrubs known Windows cwd aliases embedded as JSON strings without decoding unrelated prose', () => {
+    const windowsCtx: NormalizeContext = {
+      sessionIds: [], cwd: String.raw`C:\Users\runner\Temp\snapshot`,
+      cwdAliases: [String.raw`C:\Users\RUNNER~1\Temp\snapshot`],
+    }
+    const alias = windowsCtx.cwdAliases?.[0] ?? ''
+    const unknown = String.raw`C:\Users\other\Temp\snapshot`
+    const unrelated = String.raw`regex \d+ and command printf "\\n"`
+    const raw = JSON.stringify({
+      context: `Current directory: ${JSON.stringify(windowsCtx.cwd)}.`,
+      nested: JSON.stringify({ cwd: alias }),
+      similar: JSON.stringify(`${windowsCtx.cwd}-backup`),
+      dotted: JSON.stringify(`${windowsCtx.cwd}.backup`),
+      unknown: JSON.stringify(unknown),
+      unrelated,
+    })
+    const frame: unknown = JSON.parse(normalizeStdout(raw, windowsCtx))
+    expect(frame).toEqual({
+      context: 'Current directory: "{{cwd}}".',
+      nested: '{"cwd":"{{cwd}}"}',
+      similar: JSON.stringify(`${windowsCtx.cwd}-backup`),
+      dotted: JSON.stringify(`${windowsCtx.cwd}.backup`),
+      unknown: JSON.stringify(unknown),
+      unrelated,
+    })
+  })
+
   it('canonicalizes only cwd-rooted path separators', () => {
     const windowsCtx: NormalizeContext = {
       sessionIds: [],

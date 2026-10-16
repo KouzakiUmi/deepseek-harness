@@ -62,6 +62,7 @@ import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { requestImageTarget, toPiContext } from './context.ts'
 import { conversationUpdates, createModels, getSupportedThinkingLevels } from './models.ts'
 import { toStreamChunks } from './stream.ts'
+import { plainAssistant } from './plain-reasoning.ts'
 
 /**
  * Initially active declaration added to an Anthropic request whose projected
@@ -337,6 +338,7 @@ export class PiAiAdapter extends LlmAdapter {
       context: { contextWindow: resolvedModel.contextWindow },
       ...configuredMaxTokens === undefined ? {} : { defaultMaxTokens: configuredMaxTokens },
       ...reasoningInfo(resolvedModel, defaultLevel),
+      ...profile.reasoningReplay === 'plain' ? { reasoningReplay: 'editable-plain' as const } : {},
       ...conversationUpdates(resolvedModel),
     }
   }
@@ -400,6 +402,7 @@ export class PiAiAdapter extends LlmAdapter {
         throw new LlmError('pi-ai image input requires the durable attachment service', 'UNSUPPORTED_CONTENT')
       }
       const onReplayDegrade = (reason: string): void => {
+        if (profile.reasoningReplay === 'plain') throw new LlmError('Plain reasoning mode cannot degrade unusable replay metadata', 'INVALID_REPLAY_STATE')
         this.config.onReplayDegrade?.({ provider: options.provider, model: options.model, reason })
       }
       const context = attachments === undefined
@@ -413,7 +416,10 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade)
-      const events = snapshot.models.streamSimple(model, context, {
+      const projectedContext = profile.reasoningReplay === 'plain'
+        ? { ...context, messages: context.messages.map(message => message.role === 'assistant' ? plainAssistant(message, model) : message) }
+        : context
+      const events = snapshot.models.streamSimple(model, projectedContext, {
         ...profileOptions(profile, reasoning, apiKey),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
@@ -423,7 +429,7 @@ export class PiAiAdapter extends LlmAdapter {
         // Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers),
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, profile.reasoningReplay === 'plain')[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {

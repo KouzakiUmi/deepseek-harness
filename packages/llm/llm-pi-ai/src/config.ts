@@ -103,6 +103,11 @@ export interface PiAiProviderProfile {
   /** Endpoint for this route's models; defaults to the installed catalog's endpoint. */
   baseURL?: string
   /**
+   * Explicit plain Chat Completions replay with opaque-metadata rejection.
+   * Omission/native preserves provider replay and advertises no edit capability.
+   */
+  reasoningReplay?: 'native' | 'plain'
+  /**
    * This route's model catalog. Omission serves the installed catalog for the
    * route unchanged; an explicit list replaces it, each entry defaulting its
    * unset fields from the installed model of the same id.
@@ -328,6 +333,7 @@ const profile = z.object({
   displayName: z.string(),
   api: z.union(supportedProtocols()),
   baseURL: z.string(),
+  reasoningReplay: z.union(['native', 'plain']),
   models: z.array(modelProfile),
   modelOverrides: z.dict(modelOverride),
   compat: compatProfile,
@@ -474,6 +480,9 @@ export function resolveProfiles(
         defaultContextWindow: source.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
         defaultMaxTokens: source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
       }, validation)
+      if (source.reasoningReplay === 'plain' && catalog.models.some(model => model.api !== 'openai-completions')) {
+        throw new Error(`llm-pi-ai: provider "${provider}" plain reasoningReplay requires every model to use openai-completions`)
+      }
       catalogError = catalog.modelErrors.values().next().value
       piProvider = buildProvider({
         provider,

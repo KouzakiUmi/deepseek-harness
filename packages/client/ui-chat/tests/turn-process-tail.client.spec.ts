@@ -4,7 +4,7 @@ import { createAssistantMessage, createToolResultMessage, LlmAttemptId, ToolCall
 import { AssistantStreamAccumulator } from '@deepseek-ai/dsh-llm/assistant-stream'
 import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session/types'
 import type {
-  SessionAssistantSettlementEntry, SessionEventLikeEntry, SessionLiveEventEntry, SessionTransientEventEntry,
+  AssistantLiveChunkEvent, SessionAssistantSettlementEntry, SessionEventLikeEntry, SessionLiveEventEntry,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import { ConversationNodeAssembler } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ChatSnapshot } from '@deepseek-ai/dsh-client-ui-chat/client'
@@ -25,7 +25,7 @@ const opening = [
   entry({ type: 'turn/start', seq: SessionSeq(1), time: 1_000, data: { turn: 1 } }),
   entry({ type: 'step/start', seq: SessionSeq(2), time: 2_000, data: { turn: 1, step: 1 } }),
 ]
-const deltas: SessionTransientEventEntry[] = ['', toolBlock.arguments].map((argumentsDelta, index) => ({
+const deltas: { readonly type: 'transient'; readonly event: AssistantLiveChunkEvent }[] = ['', toolBlock.arguments].map((argumentsDelta, index) => ({
   type: 'transient', event: {
     type: 'assistant/live-chunk', seq: 2.1 + index / 10, time: 2_100 + index * 100,
     data: { turn: 1, step: 1, attemptId, chunk: {
@@ -37,7 +37,10 @@ const deltas: SessionTransientEventEntry[] = ['', toolBlock.arguments].map((argu
 
 function stream() {
   const accumulator = new AssistantStreamAccumulator()
-  for (const { event } of deltas) accumulator.push({ time: event.time, chunk: event.data.chunk })
+  for (const { event } of deltas) {
+    if (!('chunk' in event.data)) continue
+    accumulator.push({ time: event.time, chunk: event.data.chunk })
+  }
   return [...accumulator.snapshot()]
 }
 

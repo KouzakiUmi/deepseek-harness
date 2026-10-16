@@ -333,11 +333,13 @@ export interface SessionEventMap {
    * Assembled assistant message for one step (derived history uses this).
    * Carries the step's `usage` when the adapter reported token accounting, so
    * the model output and its accounting travel together (there is no separate
-   * usage record). `usage` is absent when the adapter reported none. A turn
-   * cancelled mid-stream finalizes its delivered text/reasoning prefix as this
-   * event with `interrupted: true`; undispatched tool calls are absent. The
-   * marker distinguishes that prefix without re-deriving interruption from turn
-   * boundaries. An aborted turn with no such event streamed no visible content.
+   * usage record). `usage` is absent when the adapter reported none. A stream
+   * interrupted by cancellation or a local output policy finalizes its safe
+   * delivered text/reasoning prefix with `interrupted: true`; undispatched tool
+   * calls are absent. The marker identifies an incomplete prefix, not a user
+   * cancellation or turn outcome. Policy reasons remain in the embedded stream;
+   * a resumed call can complete within the same turn. An aborted turn with no
+   * such event streamed no visible content.
    */
   'assistant/message': {
     turn: number

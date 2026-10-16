@@ -12,6 +12,8 @@ The model history must contain assistant content that remains visible to the use
 
 ## Decision
 
+The [output-policy decision](2026-10-15-safe-reasoning-interruption.md) partially supersedes this decision's restriction of interrupted-prefix settlement to user cancellation. The user-cancellation behavior and ordinary provider-failure handling described here remain in force.
+
 `ReactLoopAgent.step()` catches cancellation while consuming a model stream, when its `BlockAssembler`, compact stream accumulator, and provider route identify the delivered prefix. It appends that prefix as the step's `assistant/message` with `interrupted: true`, `surfaceOp: 'append'`, and the exact embedded timed stream. The append precedes the committed `agent/assistant-stream` end frame, `step/end`, and the aborted `turn/end`.
 
 `BlockAssembler.interruptedBlocks()` returns closed and open `text` and `reasoning` blocks with non-whitespace content in stream order. It omits tool calls because interruption precedes dispatch and no real result exists; it also omits empty blocks and open unknown block types. An empty result appends `assistant/attempt` instead of a surface message. Provider `error` and `aborted` finishes also commit `assistant/attempt` before `agent/request-error`, so their streams remain durable without contributing failed-request content to model history.

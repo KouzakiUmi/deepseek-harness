@@ -1,0 +1,36 @@
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: llm-deepseek
+  disabled: true
+- id: repeat-tool-reminder
+  name: '@deepseek-ai/dsh-repeat-tool-reminder'
+  config:
+    reasoningLoop:
+      windowChars: 2048
+      scanChars: 16
+      holdChars: 160
+      confirmChars: 480
+      cancelChars: 4096
+      recoveryChars: 160
+      maxPeriodChars: 128
+      minPoolUnits: 12
+      poolShare: 0.72
+      visibleStall: false
+      maxRecoveries: 1
+      settlementBudget: 65536
+- id: llm-replay
+  name: '@deepseek-ai/dsh-llm-replay'
+  config:
+    providers:
+      - id: guard-replay-fixture
+        models:
+          - id: fixture
+            reasoningReplay: editable-plain
+        retryPolicy:
+          mode: always
+          backoff:
+            initialDelayMs: 1
+            maxDelayMs: 1
+            jitterRatio: 0

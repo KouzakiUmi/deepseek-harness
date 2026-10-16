@@ -121,7 +121,11 @@ function cwdSpellings(ctx: NormalizeContext): string[] {
   const macAliases = spellings
     .filter(spelling => spelling.startsWith('/') && !spelling.startsWith('/private/'))
     .map(spelling => `/private${spelling}`)
-  return [...new Set([...spellings, ...macAliases])]
+  const known = [...spellings, ...macAliases]
+  // Runtime-context prose embeds JSON.stringify(cwd); match that known spelling,
+  // not arbitrary JSON or backslash sequences in model/tool-authored text.
+  const encoded = known.map(spelling => JSON.stringify(spelling).slice(1, -1))
+  return [...new Set([...known, ...encoded])]
     .sort((left, right) => right.length - left.length)
 }
 

@@ -243,3 +243,51 @@ describe('ClientAssistantStream', () => {
     }))).toEqual({ type: 'rebaseline' })
   })
 })
+
+describe('ClientAssistantStream detection stages', () => {
+  it('publishes one transient row per stage announcement', () => {
+    const stream = opened()
+    const result = stream.acceptFrame({ type: 'stage', attemptId: ATTEMPT, revision: 2, turn: 1, step: 1, stage: 'suspected', index: 0 })
+    expect(result?.type).toBe('transient')
+    if (result?.type !== 'transient') throw new Error('expected a transient stage row')
+    expect(result.entry.event).toMatchObject({
+      type: 'assistant/live-chunk',
+      data: { attemptId: ATTEMPT, turn: 1, step: 1, stage: 'suspected', index: 0 },
+    })
+  })
+
+  it('ignores a stage for an attempt this connection never opened', () => {
+    const stream = opened()
+    expect(stream.acceptFrame({ type: 'stage', attemptId: LlmAttemptId('session:other'), revision: 2, turn: 1, step: 1, stage: 'released', index: 0 })).toBeUndefined()
+  })
+
+  it('restores the live attempt stage from the reopening baseline', () => {
+    const stream = new ClientAssistantStream()
+    const visible = stream.replace([ordinary(4)], {
+      revision: 3,
+      activeAttempt: {
+        attemptId: ATTEMPT, startedAfterSeq: -1, turn: 1, step: 1, nextIndex: 0,
+        stream: [],
+        stage: 'released',
+      },
+    })
+    const stage = visible.filter(candidate => candidate.type === 'transient')
+      .map(candidate => candidate.event)
+      .filter(event => event.type === 'assistant/live-chunk' && 'stage' in event.data)
+    expect(stage).toHaveLength(1)
+    expect(stage[0]).toMatchObject({ seq: 4.5, data: { stage: 'released', attemptId: ATTEMPT, turn: 1, step: 1 } })
+  })
+
+  it('orders a stage row inside the open durable gap and stages its settlement', () => {
+    const stream = opened()
+    const stage = stream.acceptFrame({ type: 'stage', attemptId: ATTEMPT, revision: 2, turn: 1, step: 1, stage: 'suspected', index: 0 })
+    if (stage?.type !== 'transient') throw new Error('expected a transient stage row')
+    // The row sits inside the open gap and carries the attempt identity the
+    // durable settlement will retire.
+    expect(stage.entry.event.seq).toBeLessThan(1)
+    expect(stage.entry.event.data.attemptId).toBe(ATTEMPT)
+    expect(stream.acceptDurable(messageEvent(1))).toBeUndefined()
+    // A committed message publishes its durable row and keeps the attempt until the Step ends.
+    expect(stream.acceptFrame(end(0, { kind: 'committed', eventType: 'assistant/message', seq: 1 }))?.type).toBe('publish')
+  })
+})

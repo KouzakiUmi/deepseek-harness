@@ -15,7 +15,7 @@
  */
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { evaluate, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
@@ -130,8 +130,20 @@ function readManifest(path: string): PackageManifest {
   return JSON.parse(readFileSync(path, 'utf8')) as PackageManifest
 }
 
-/** Resolve package manifests to real paths so linked bundles use their own dependency directories. */
+/**
+ * Resolve package manifests to real paths so linked bundles use their own
+ * dependency directories.
+ *
+ * A bundle lists itself among its own patch rows, and a package manager does not
+ * link a workspace package into itself, so that row is answered by an anchor's
+ * own manifest identity before any dependency search. Only an exact `name` match
+ * qualifies; every other row keeps the ordinary search and its identity check.
+ */
 function locateManifest(anchors: readonly string[], name: string): string | undefined {
+  for (const anchor of anchors) {
+    if (basename(anchor) !== 'package.json' || !existsSync(anchor)) continue
+    if (readManifest(anchor).name === name) return realpathSync(anchor)
+  }
   const paths = anchors.map(anchor => createRequire(anchor).resolve.paths(name) ?? [])
   for (let depth = 0; depth < Math.max(...paths.map(search => search.length)); depth++) {
     for (const search of paths) {

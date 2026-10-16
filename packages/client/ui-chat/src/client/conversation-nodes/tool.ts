@@ -61,7 +61,7 @@ function rootCall(match: ConversationMatch, previous?: ToolCallBlock): StartedTo
  */
 function applyDelta(state: ToolState, match: ConversationMatch): ToolState {
   const event = match.event
-  if (event.type !== 'assistant/live-chunk') return state
+  if (event.type !== 'assistant/live-chunk' || !('chunk' in event.data)) return state
   const chunk = event.data.chunk
   const root = state.root
   if (chunk.type === 'block-end' && chunk.block.type === 'tool-call') {
@@ -294,6 +294,7 @@ export const toolDefinition: ConversationNodeDefinition<ToolState> = {
   target: 'chat',
   match: (event) => {
     if (event.type === 'assistant/live-chunk') {
+      if (!('chunk' in event.data)) return null
       // Every delta of a call is a start candidate: the earliest opens the Context, later ones fold as updates.
       const chunk = event.data.chunk
       if (chunk.type === 'block-end' && chunk.block.type === 'tool-call') {

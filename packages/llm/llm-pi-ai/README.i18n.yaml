@@ -32,6 +32,9 @@
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/run-with-reasoning-and-wire-compatibility:
   en: b58b917e7f250aee
   zh: aff599081bac08c3
+/deepseek-ai-dsh-llm-pi-ai/use-this-package/explicit-plain-reasoning-replay:
+  en: caa6aa16830d53bf
+  zh: f4fd6586fd3af85d
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/change-configuration-at-runtime:
   en: 92f554e1718614ca
   zh: f17ed3ad3e5d28e2
@@ -57,8 +60,8 @@
   en: 477d277e9ac35c8f
   zh: 96870ca333fb6510
 /deepseek-ai-dsh-llm-pi-ai/understand-the-implementation/replay-and-vocabulary:
-  en: 73242ca9b8a98c76
-  zh: 4ab98526ae70bd23
+  en: 6af239febc550947
+  zh: 2a4965ddf75e6ee6
 /deepseek-ai-dsh-llm-pi-ai/further-exploration:
   en: a2a2ccdeae59d408
   zh: c47ee091aa90ad91

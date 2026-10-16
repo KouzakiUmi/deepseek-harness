@@ -315,7 +315,8 @@ describe('scope tree', () => {
     })
 
     expect(binding.eventSource.getSnapshot().entries.map(entry => (
-      entry.event.type === 'assistant/live-chunk' && entry.event.data.chunk.type === 'text-delta'
+      entry.event.type === 'assistant/live-chunk' && 'chunk' in entry.event.data
+        && entry.event.data.chunk.type === 'text-delta'
         ? entry.event.data.chunk.text
         : undefined
     ))).toEqual(['a', 'b'])

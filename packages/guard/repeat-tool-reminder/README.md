@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package helps a model escape loops in which it calls the same tool with identical arguments without making progress. At configured repeat counts, it asks the model to inspect the previous result and change approach or finish. The reminder is advisory: it never blocks or delays a legitimate repeated call. Repeats are tracked separately for each agent and cleared by a new user message. The `dsh` base bundle enables the package with reminders at 3, 5, and 8 repeats.
+This package gives each agent advisory reminders when it repeats identical tool calls. The base bundle enables reminders at 3, 5, and 8 repeats; these reminders never block calls. Separately, opt-in `reasoningLoop` suppresses sustained exact-copy reasoning before delivery on explicitly editable-plain routes, and stalls output once one observation finds repeated sentences. Normal reasoning passes immediately, tentative text is buffered, and confirmed copies cannot return through a completed block. Unknown and signed routes remain unchanged.
 
 ## Table of Contents
 
@@ -53,6 +53,18 @@ When you want to change when reminders fire or which tools they cover, mount the
 
 Invalid configuration fails at startup with a clear error — an empty `thresholds` list, a repeat count below 2, or a duplicate — never a silent change of behavior. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-repeat-tool-reminder) documents every accepted value.
 
+### Optional reasoning-copy suppression
+
+`reasoningLoop: {}` explicitly enables output editing; omission or `false` disables it. This is separate from advisory tool reminders. The selected adapter must declare `editable-plain` on the same prepared model call. The pi-ai adapter's explicit `reasoningReplay: plain` mode supplies this capability for its checked Chat Completions path; native Messages signatures and unknown routes do not qualify. See the [pi-ai replay mode](../../llm/llm-pi-ai/README.md) before enabling it.
+
+The policy preserves the earliest accepted original and removes exact copies only after sustained evidence from a bounded raw suffix. It detects periodic strings without newlines and reordered complete sentence units, but does not normalize identifiers, numbers, or negations. Detection delay permits some initial copies to pass. Unconfirmed text is released at recovery or before another event; confirmed copies never return, and a completed reasoning block cannot restore them. A complete protocol tool block protects normal settlement from repetition-driven cancellation without making incremental arguments executable. After the first such block, `settlementBudget: 65536` bounds unfinished settlement: every subsequent non-finish event costs one unit plus its new delta's UTF-16 characters. The budget never resets for another tool block. Exceeding it ends the call with `TOOL_SETTLEMENT_LIMIT`, dispatches no tools from that call, and does not continue or enter ordinary retry. This host-side bound does not rely on provider output-limit compliance; silence remains subject to the adapter's idle watchdog.
+
+A visible stall runs on the same characters before exact-copy filtering. Output is released as it arrives until one observation of `windowChars: 1024` characters holds both recurring sentences and reused characters; the following characters are then withheld while the observation window doubles toward `maxWindowChars: 8192`. `confirmWindows: 3` consecutive qualifying observations discard the withheld suffix and end the call with `REASONING_LOOP`; `recoveryWindows: 2` consecutive non-qualifying observations, a tool barrier, or final settlement release it verbatim. Reaching `maxWindowChars` is a retention and observation bound, never a requirement to wait: the stall decides there with the evidence it has, ending a call whose repetition is still current and releasing one that has fallen back. A complete protocol tool block keeps withholding but never lets the stall cancel the call. Fenced code suspends the stall, because example scaffolding repeats without being a reasoning loop. `unitShare: 0.5`, `unitCharShare: 0.15`, `shingleChars: 8`, and `shingleShare: 0.6` require recurring sentences that carry real mass over reused fragments, so progress whose sentences introduce new identifiers, counters, or verdicts is released untouched, and `visibleStall: false` keeps the exact-copy filter alone.
+
+The settings are UTF-16 character counts: `windowChars: 4096`, `scanChars: 32`, `holdChars: 256`, `confirmChars: 1024`, `cancelChars: 16384`, `recoveryChars: 256`, and `maxPeriodChars: 192`; sentence-pool evidence uses `minPoolUnits: 16` and `poolShare: 0.75`. These are conservative heuristics, not measured accuracy guarantees. Invalid bounds fail at plugin activation. A long confirmed loop ends only its model call with `REASONING_LOOP`, not a fabricated stop or token-limit outcome.
+
+`maxRecoveries: 1` permits one continuation per turn in this policy instance; `0` stops without continuing. The safe reasoning/text prefix is stored as an interrupted assistant message, without undispatched tools or replay metadata. A separately attributed, persisted user message requests a different approach before the next call in the same activity; its source records the Step it continues, the one-based recovery ordinal, and the Turn's configured limit, so a presentation consumer needs no inference from the surrounding window. Exhaustion is a real error, not normal completion; ordinary `always` retry cannot resume it. User/parent/disposal cancellation and iterator cleanup failure prevent recovery. Unloading the plugin lets an already captured call finish its filtering/stop but forbids another policy-authorized call.
+
 ### What you get
 
 With the defaults, a model that repeats the same call with identical arguments receives a short reminder on the third repeat — to analyze the previous result before calling again — and detailed reminders on the fifth and eighth, naming the tool and the repeated arguments so it can decide whether to change approach, gather more evidence, or finish. A new user message clears the count, so a fresh instruction is never treated as a loop. Reminders appear in the conversation after the repeated call's result, attributed to the plugin, so the model reads them like any other message.
@@ -95,6 +107,8 @@ Reminders ride the post-execute decision's `additionalContexts` (source `{kind: 
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `Config` schema, fail-loud validation, chain listeners |
+| [`src/reasoning-policy.ts`](src/reasoning-policy.ts) | Optional call-local output filtering and attributed recovery decisions |
+| [`src/reasoning-watch.ts`](src/reasoning-watch.ts) | Bounded raw-copy evidence and tentative buffering |
 
 </details>
 
@@ -158,6 +172,20 @@ Each reminder is retained history; `argumentsPreviewChars` bounds its data-depen
 
 Append-only; newly visible content follows the reusable request prefix and does not invalidate existing KV-cache entries.
 
+### Optional reasoning recovery
+
+#### What the model sees
+
+With `reasoningLoop` enabled on an editable route, retained history contains the safe interrupted prefix and an attributed continuation asking for a different approach without repeating it. A stop caused by the visible stall retains the same prefix and states that the unconfirmed repetitive tail was discarded instead of removed copies; both continuations are asserted by the output-policy composition tests, and the exact-copy continuation is additionally pinned by the authored reasoning-loop recovery Session. Native spawn/fork retain the same activation; externally executed agents are not covered by a policy installed only in their parent.
+
+#### Token effect
+
+Accepted copies are removed before history commit; local suppression does not reduce provider-side token generation, accounting, or SDK buffers. A permitted recovery adds one short persisted prompt and another model request; it does not invent missing usage.
+
+#### KV Cache effect
+
+The committed prefix and continuation append to prior history. No earlier history is rewritten. The explicit plain adapter's reasoning-only projection changes representation in the new request and makes no cross-representation cache-reuse guarantee.
+
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
@@ -167,7 +195,9 @@ These limits define when the guard is a poor fit. They are current package const
 
 - **Exact-match detection only** — canonicalization is a deep key-sort, so near-identical variants (a tweaked path, extra whitespace inside a value) evade the chain; fuzzy matching is rejected pending evidence of need.
 - **Compaction does not reset chains** — a chain spanning a compaction checkpoint keeps counting.
-- **Advisory only** — escalating to a blocking form at a high threshold is not implemented, though `PostToolDecision` already supports blocking.
+- **Tool reminders remain advisory** — `reasoningLoop` edits reasoning output, not tool calls or their results.
+- **Reasoning support is bounded** — the policy filters the first reasoning index per call; additional indexes pass unchanged. Exact-copy evidence cannot establish semantic correctness or catch arbitrary micro-variations. Unknown and opaque replay routes are not edited; external subagent processes need their own composed policy.
+- **The visible stall is a heuristic with a measured false-positive floor** — 7 of the 106 reasoning blocks longer than 2,000 characters in the recorded session behind it crossed its thresholds; one of those kept repeating for roughly 4,000 further characters and then recovered on its own, so a stop can land inside a repetitive episode that would have ended by itself. Observations shorter than one window, fenced code, and progress carrying new identifiers or values pass through untouched, and only exact-copy evidence removes characters.
 - **No subagent chain-sharing** — chains stay isolated per agent; a parent and its subagent repeating the same call never combine.
 - **Legitimate idempotent polling still draws nudges** past the thresholds — the pressure valves are the `thresholds`/`exclude` config.
 - **Past the highest threshold a chain goes silent** — reminders fire only at exact configured counts, never beyond them.

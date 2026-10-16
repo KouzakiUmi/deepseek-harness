@@ -1,8 +1,8 @@
 /**
- * Advisory per-agent repeat-call detector. It enriches post-execute decisions
- * with logged model context without vetoing or rewriting calls. Configuration
- * and chain semantics live in the package README; rationale lives in the
- * repeat-tool-reminder Agent Note.
+ * Advisory per-agent repeat-call detector with independent opt-in reasoning
+ * suppression. Tool reminders enrich post-execute decisions without vetoing
+ * calls; output editing requires the adapter's explicit plain-replay capability.
+ * Configuration and limits live in the package README.
  * @module @deepseek-ai/dsh-repeat-tool-reminder
  */
 
@@ -11,6 +11,7 @@ import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
+import { installReasoningPolicy, ReasoningLoopConfig } from './reasoning-policy.ts'
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'repeat-tool-reminder': { kind: 'repeat-tool-reminder' } & ContextFormed
@@ -33,6 +34,8 @@ export const name = 'repeat-tool-reminder'
  * (`exclude: [mcp_*]` must stay legal in a deployment that loads no MCP tools).
  */
 export interface Config {
+  /** Optional exact-copy suppression and bounded recovery for explicitly editable-plain reasoning; omitted disables output editing. */
+  reasoningLoop?: false | ReasoningLoopConfig
   /** Consecutive-repeat counts that trigger a reminder (default `[3, 5, 8]`). */
   thresholds?: number[]
   /** Tool-name patterns to track; empty means every tool is tracked. */
@@ -50,6 +53,7 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
+  reasoningLoop: z.union([z.const(false), ReasoningLoopConfig]),
   thresholds: z.array(z.number()).default([3, 5, 8]),
   include: z.array(z.string()).default([]),
   exclude: z.array(z.string()).default([]),
@@ -167,6 +171,7 @@ interface Chain {
  * @param config - validated {@link Config}; `thresholds` is re-checked fail-loud here.
  */
 export function apply(ctx: Context, config: Config): void {
+  if (config.reasoningLoop !== undefined && config.reasoningLoop !== false) installReasoningPolicy(ctx, config.reasoningLoop)
   // schemastery's .default() guarantees the fields are set after validation.
   const thresholds = validateThresholds(config.thresholds as number[])
   const thresholdSet = new Set(thresholds)

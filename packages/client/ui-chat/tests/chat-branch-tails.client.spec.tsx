@@ -16,6 +16,7 @@ import {
   UserMessageNodeView,
 } from '../src/client/chat/MessageItem.tsx'
 import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
+import { RecoveryNotice } from '../src/client/chat/RecoveryNotice.tsx'
 import { useDetailedPresentation } from './presentation-fixture.client.ts'
 import { unusedImageLoader } from './reasoning-component-fixture.tsx'
 import { createUserContentFixture } from './user-content-component-fixture.tsx'
@@ -1132,5 +1133,99 @@ describe('user file attachments', () => {
     )
     expect(new Set(icons).size).toBe(icons.length)
     expect(view.getByText('summarize these')).toBeTruthy()
+  })
+})
+
+const recovery = { attempt: 1, limit: 3, prompt: [{ type: 'text', text: 'continue the unfinished task' }] } as const
+
+describe('reasoning-loop recovery notice', () => {
+
+  it('states the truncation and the recovery ordinal while the call continues', () => {
+    const view = render(<RecoveryNotice recovery={recovery} running t={t} />)
+    expect(view.getByRole('button', { name: /检测到重复输出\s*已截断，正在续跑（第 1\/3 次）/ })).toBeTruthy()
+    fireEvent.click(view.getByRole('button'))
+    expect(view.container.querySelector('[data-recovery-prompt]')?.textContent).toBe('continue the unfinished task')
+  })
+
+  it('drops the continuing wording once the resumed call settles', () => {
+    const view = render(<RecoveryNotice recovery={recovery} running={false} t={t} />)
+    expect(view.getByRole('button', { name: /已截断续跑完成（第 1\/3 次）/ })).toBeTruthy()
+  })
+
+  it('keeps a plain account for a log that records no ordinal', () => {
+    const view = render(
+      <RecoveryNotice recovery={{ prompt: [{ type: 'text', text: 'continue' }] }} running={false} t={t} />,
+    )
+    expect(view.getByRole('button', { name: /检测到重复输出\s*已截断续跑完成$/ })).toBeTruthy()
+  })
+})
+
+describe('reasoning-loop truncation notice', () => {
+  it('reports the cut before any settlement exists', () => {
+    const view = render(
+      <RecoveryNotice interruption={{ message: 'Reasoning output was interrupted.' }} running t={t} />,
+    )
+    expect(view.getByRole('button', { name: (value: string) => value.includes('已确认重复，正在截断') })).toBeTruthy()
+    fireEvent.click(view.getByRole('button'))
+    expect(view.container.querySelector('[data-recovery-prompt]')?.textContent)
+      .toBe('Reasoning output was interrupted.')
+  })
+})
+
+describe('reasoning-loop truncation priority', () => {
+  it('reports a new cut instead of the recovery this Step already consumed', () => {
+    const view = render(
+      <RecoveryNotice
+        recovery={recovery}
+        interruption={{ message: 'Reasoning output was interrupted again.' }}
+        running
+        t={t}
+      />,
+    )
+    const header = view.getByRole('button', {
+      name: (value: string) => value.includes('检测到重复输出') && value.includes('已确认重复，正在截断'),
+    })
+    expect(header).toBeTruthy()
+    fireEvent.click(header)
+    expect(view.container.querySelector('[data-recovery-prompt]')?.textContent)
+      .toBe('Reasoning output was interrupted again.')
+  })
+
+  it('reports the new ordinal once the next continuation clears the cut', () => {
+    const view = render(
+      <RecoveryNotice recovery={{ ...recovery, attempt: 2 }} running t={t} />,
+    )
+    expect(view.getByRole('button', {
+      name: (value: string) => value.includes('正在续跑') && value.includes('2/3'),
+    })).toBeTruthy()
+  })
+})
+
+describe('reasoning-loop detection stages', () => {
+  it('names each withholding stage of the live attempt', () => {
+    const cases = [
+      ['suspected', '检测到疑似重复，正在缓冲检查'],
+      ['released', '重复率已回落，已放行，继续输出'],
+      ['barrier', '缓冲已放行，继续输出'],
+    ] as const
+    for (const [stage, copy] of cases) {
+      const view = render(<RecoveryNotice stall={stage} running t={t} />)
+      expect(view.getByRole('button', { name: (value: string) => value.includes('推理重复检测') && value.includes(copy) })).toBeTruthy()
+      cleanup()
+    }
+  })
+
+  it('reports the confirmed cut instead of the stage that preceded it', () => {
+    const view = render(
+      <RecoveryNotice
+        stall="released"
+        interruption={{ message: 'Reasoning output was interrupted.' }}
+        running
+        t={t}
+      />,
+    )
+    expect(view.getByRole('button', {
+      name: (value: string) => value.includes('检测到重复输出') && value.includes('已确认重复，正在截断'),
+    })).toBeTruthy()
   })
 })

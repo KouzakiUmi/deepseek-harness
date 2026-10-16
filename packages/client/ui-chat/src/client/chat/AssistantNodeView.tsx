@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo } from 'react'
 import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ChatNodeViewProps, PresentationInjected, TurnTailOwnerProps } from '../contract/slots.ts'
 import { AssistantMarkdown } from './AssistantMarkdown.tsx'
+import { RecoveryNotice } from './RecoveryNotice.tsx'
 
 type AssistantNodeViewProps = ChatNodeViewProps<'assistant-step'> & InjectFace<PresentationInjected>
   & PropsRenderSlots<'conversation.chat.reasoning.body' | 'conversation.chat.message.images'>
@@ -32,20 +33,52 @@ export const AssistantNodeView = memo(function AssistantNodeView({
     && !turnProcess.open
   const revealProcess = useCallback(() => { turnProcess?.setOpen(true) }, [turnProcess])
   return (
-    <AssistantMarkdown
-      blocks={data.blocks}
-      groupPart={groupPart}
-      useDisclosure={useDisclosure}
-      streaming={data.status === 'running'}
-      interrupted={data.status === 'interrupted'}
-      loadImage={loadImage}
-      reasoningHidden={reasoningHidden}
-      useGroupAction={useGroupAction}
-      usePresentation={usePresentation}
-      renderSlot={renderSlot}
-      revealProcess={revealProcess}
-      mentions={mentions}
-      t={t}
-    />
+    <>
+      {/* The notice belongs to the Step, not to one of its rendering groups. */}
+      {(data.recovery !== undefined || data.interruption !== undefined || data.stall !== undefined)
+        && groupPart !== 'reasoning' && (
+        <RecoveryNotice
+          recovery={data.recovery}
+          interruption={data.interruption}
+          stall={data.stall}
+          running={data.status === 'running'}
+          t={t}
+        />
+      )}
+      {/* A Step that recovered from a local interruption renders the prefix it
+          already delivered before the attempt that continued it. */}
+      {data.retained?.map(segment => (
+        <AssistantMarkdown
+          key={segment.seq}
+          blocks={segment.blocks}
+          groupPart={groupPart}
+          useDisclosure={useDisclosure}
+          streaming={false}
+          truncated={segment.interrupted === true}
+          loadImage={loadImage}
+          reasoningHidden={reasoningHidden}
+          useGroupAction={useGroupAction}
+          usePresentation={usePresentation}
+          renderSlot={renderSlot}
+          revealProcess={revealProcess}
+          t={t}
+        />
+      ))}
+      <AssistantMarkdown
+        blocks={data.blocks}
+        groupPart={groupPart}
+        useDisclosure={useDisclosure}
+        streaming={data.status === 'running'}
+        interrupted={data.status === 'interrupted'}
+        loadImage={loadImage}
+        reasoningHidden={reasoningHidden}
+        useGroupAction={useGroupAction}
+        usePresentation={usePresentation}
+        renderSlot={renderSlot}
+        revealProcess={revealProcess}
+        mentions={mentions}
+        t={t}
+      />
+    </>
   )
 })

@@ -54,8 +54,10 @@ export type {
 } from './contract/sessions.ts'
 export { MutableSessionEventSource } from './contract/events.ts'
 export type {
+  AssistantLiveChunkData,
   AssistantLiveChunkEvent,
   SessionAssistantSettlementEntry,
+  SessionAssistantStreamStage,
   SessionEventChange,
   SessionEventLike,
   SessionEventLikeEntry,

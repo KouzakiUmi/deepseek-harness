@@ -166,7 +166,9 @@ export class SessionLogModel implements ObservableSnapshot<readonly InspectorRow
   private add(entry: SessionEventLikeEntry, rows: InspectorRow[]): void {
     if (entry.type === 'transient') {
       const event = entry.event
-      const { attemptId, turn, step, chunk } = entry.event.data
+      // A detection stage is presentation-only: this ledger lists model output.
+      if (!('chunk' in event.data)) return
+      const { attemptId, turn, step, chunk } = event.data
       const parent = `attempt:${attemptId}`
       let attempt = this.attempts.get(parent)
       if (attempt === undefined) {

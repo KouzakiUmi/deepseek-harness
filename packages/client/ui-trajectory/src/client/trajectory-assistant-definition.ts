@@ -233,6 +233,8 @@ function fallbackState(context: ConversationNodeContext<AssistantState>): Assist
   for (const match of context.matches) {
     const event = match.event
     if (event.type === 'assistant/live-chunk') {
+      // A detection stage carries no model output; the ledger keeps model output only.
+      if (!('chunk' in event.data)) continue
       state ??= initialState(event.data.turn, event.data.step, event.seq, event.time, false)
       state = updateChunk(state, event.data.chunk, event.seq, event.time)
     } else if (event.type === 'assistant/attempt') {
@@ -358,7 +360,9 @@ const trajectoryAssistantDefinition: ConversationNodeDefinition<AssistantState> 
   },
   update: (context, match) => {
     if (match.event.type === 'assistant/live-chunk') {
-      return updateChunk(context.state, match.event.data.chunk, match.event.seq, match.event.time)
+      return 'chunk' in match.event.data
+        ? updateChunk(context.state, match.event.data.chunk, match.event.seq, match.event.time)
+        : context.state
     }
     if (match.event.type === 'assistant/message') return settleMessage(context.state, match, match.event)
     if (match.event.type === 'assistant/attempt') return settleTiming(context.state, match.event)
@@ -388,6 +392,7 @@ const trajectoryAssistantDefinition: ConversationNodeDefinition<AssistantState> 
   publication: (match) => {
     if (match.event.type === 'step/start' || match.event.type === 'assistant/attempt') return 'none'
     if (match.event.type !== 'assistant/live-chunk') return 'immediate'
+    if (!('chunk' in match.event.data)) return 'immediate'
     const type = match.event.data.chunk.type
     return type === 'usage' || type === 'finish' ? 'none' : 'animation-frame'
   },

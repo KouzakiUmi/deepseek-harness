@@ -73,6 +73,8 @@ export function modelInfo(
     ...configured === undefined
       ? { provider, id: model, name: model, inputModalities: ['text' as const] }
       : catalogModelInfo(provider, configured),
+    // Messages thinking can carry provider signatures bound to the original bytes.
+    reasoningReplay: 'opaque',
     context: { contextWindow },
     defaultMaxTokens: configured?.maxTokens ?? connection.maxTokens,
     ...configured?.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: configured.systemPromptUpdate },

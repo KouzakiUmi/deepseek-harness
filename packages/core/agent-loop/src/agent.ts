@@ -10,6 +10,8 @@ import type {
   AgentEventDispatch,
   AgentOptions,
   AgentStatus,
+  AssistantOutputInterruption,
+  AssistantOutputPolicy,
   CancelOptions,
   InboxTarget,
   PreStepDecision,
@@ -439,7 +441,15 @@ export class ReactLoopAgent implements Agent {
         this.session.append('user/message', context, { surfaceOp: 'append' })
       }
       firstAttempt = false
-      const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
+      const outputPolicy: AssistantOutputPolicy | undefined = this.dispatch.waterfall(
+        'agent/output-policy', { turn, step, preparedCall, signal }, () => undefined,
+      )
+      if (outputPolicy !== undefined && preparedCall?.reasoningReplay !== 'editable-plain') {
+        throw new LlmError('assistant output editing requires an explicit editable-plain adapter capability', 'INVALID_OUTPUT_POLICY')
+      }
+      const callAbort = outputPolicy === undefined ? undefined : new AbortController()
+      const callSignal = callAbort === undefined ? signal : AbortSignal.any([signal, callAbort.signal])
+      const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, callSignal)
       const live = new AssistantStreamAttempt(
         this.session.id,
         ++this.assistantAttemptCounter,
@@ -449,20 +459,52 @@ export class ReactLoopAgent implements Agent {
         (frame) => { this.dispatch.emit('agent/assistant-stream', { frame }) },
       )
       let started = false
+      let localInterruption: { decision: AssistantOutputInterruption; error: LlmError } | undefined
       try {
         const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request)
         signal.throwIfAborted()
         live.start()
         started = true
-        for await (const chunk of stream) {
+        try {
+          for await (const chunk of stream) {
+            signal.throwIfAborted()
+            if (outputPolicy === undefined) live.push(chunk)
+            else {
+              for (const accepted of outputPolicy.push(chunk)) {
+                signal.throwIfAborted()
+                live.accept(accepted)
+              }
+              const decision = outputPolicy.interruption
+              if (decision !== undefined) {
+                const failure = decision.failure
+                const error = new LlmError(failure.message, failure.code, failure)
+                localInterruption = { decision, error }
+                // The call is already cut; publish the policy's real failure
+                // before provider cleanup, which may take as long as the
+                // transport decides. A reader must not wait for teardown to
+                // learn the guard interrupted this call.
+                if (!signal.aborted) live.push({ type: 'finish', reason: { kind: 'error', failure } })
+                callAbort?.abort(error)
+                break
+              }
+            }
+          }
+          if (localInterruption !== undefined) throw localInterruption.error
+          for (const accepted of outputPolicy?.flush() ?? []) live.accept(accepted)
           signal.throwIfAborted()
-          live.push(chunk)
+        } finally {
+          callAbort?.abort(new Error('assistant output call settled'))
         }
-        signal.throwIfAborted()
       } catch (error: unknown) {
         if (!started) throw error
         try {
-          if (signal.aborted) {
+          for (const accepted of outputPolicy?.flush() ?? []) {
+            // A cancelled call announces no detection stage: a release reported
+            // after cancellation would read as a call that continued.
+            if (accepted.type === 'reasoning-stall' && signal.aborted) continue
+            live.accept(accepted)
+          }
+          if (signal.aborted || (localInterruption !== undefined && error === localInterruption.error)) {
             const content = live.interruptedBlocks()
             if (content.length > 0) {
               live.settle('assistant/message', () => this.session.append('assistant/message', {
@@ -498,6 +540,18 @@ export class ReactLoopAgent implements Agent {
             'Assistant stream failed and its durable settlement was rejected',
             { cause: error },
           )
+        }
+        if (localInterruption !== undefined) {
+          if (error !== localInterruption.error) {
+            throw new AggregateError([localInterruption.error, error], 'Assistant output interruption cleanup failed', { cause: localInterruption.error })
+          }
+          signal.throwIfAborted()
+          const continuation = localInterruption.decision.continuation
+          if (continuation !== undefined) {
+            this.session.append('user/message', continuation, { surfaceOp: 'append' })
+            signal.throwIfAborted()
+            continue
+          }
         }
         throw error
       }
