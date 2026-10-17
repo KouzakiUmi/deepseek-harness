@@ -392,6 +392,9 @@ importers:
       '@deepseek-ai/dsh-pwsh-sandbox':
         specifier: workspace:*
         version: link:../../packages/shell/pwsh-sandbox
+      '@deepseek-ai/dsh-repeat-tool-reminder':
+        specifier: workspace:*
+        version: link:../../packages/guard/repeat-tool-reminder
       '@deepseek-ai/dsh-schedule':
         specifier: workspace:*
         version: link:../../packages/schedule/schedule
