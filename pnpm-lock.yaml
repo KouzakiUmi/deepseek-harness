@@ -2339,9 +2339,6 @@ importers:
       '@deepseek-ai/dsh-pwsh-sandbox':
         specifier: workspace:*
         version: link:../../shell/pwsh-sandbox
-      '@deepseek-ai/dsh-repeat-tool-reminder':
-        specifier: workspace:*
-        version: link:../../guard/repeat-tool-reminder
       '@deepseek-ai/dsh-sandbox-local':
         specifier: workspace:*
         version: link:../../sandbox/sandbox-local
