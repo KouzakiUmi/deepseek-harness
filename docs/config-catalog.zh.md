@@ -1779,7 +1779,7 @@ export interface Config extends ProtocolConfig {
 
 - `inject`: `llm`
 - `refs`: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-pi-ai/src/config.ts:222`](../packages/llm/llm-pi-ai/src/config.ts)
+- `source`: [`packages/llm/llm-pi-ai/src/config.ts:227`](../packages/llm/llm-pi-ai/src/config.ts)
 
 ```ts config-catalog
 /** Plugin configuration: the provider routes this instance owns. */
@@ -1806,6 +1806,11 @@ export interface PiAiProviderProfile {
   api?: string
   /** Endpoint for this route's models; defaults to the installed catalog's endpoint. */
   baseURL?: string
+  /**
+   * Explicit plain Chat Completions replay with opaque-metadata rejection.
+   * Omission/native preserves provider replay and advertises no edit capability.
+   */
+  reasoningReplay?: 'native' | 'plain'
   /**
    * This route's model catalog. Omission serves the installed catalog for the
    * route unchanged; an explicit list replaces it, each entry defaulting its
@@ -2053,8 +2058,8 @@ export type PiAiThinkingTokenBudgetField = NonNullable<OpenAICompletionsCompat['
 ## `@deepseek-ai/dsh-llm-replay`
 
 - `inject`: `llm`
-- `refs`: [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · [`SystemPromptUpdate`](../packages/llm/llm/src/index.ts) · [`ToolUpdate`](../packages/llm/llm/src/index.ts)
-- `source`: [`packages/test-support/llm-replay/src/index.ts:1129`](../packages/test-support/llm-replay/src/index.ts)
+- `refs`: [`LlmResolvedModelInfo`](subsystems/llm-streaming.zh.md) · [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · [`SystemPromptUpdate`](../packages/llm/llm/src/index.ts) · [`ToolUpdate`](../packages/llm/llm/src/index.ts)
+- `source`: [`packages/test-support/llm-replay/src/index.ts:1132`](../packages/test-support/llm-replay/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: the {@link ReplayConfig} inputs, each defaulting to its `DSH_SNAPSHOT_*` env var in `apply`. */
@@ -2124,6 +2129,8 @@ export interface ReplayModelConfig {
   systemPromptUpdate?: SystemPromptUpdate
   /** Optional mid-conversation tool declaration mode for a keyless replay route. */
   toolUpdate?: ToolUpdate
+  /** Explicit reasoning editing/replay capability for output-policy scenarios; absent remains unknown. */
+  reasoningReplay?: LlmResolvedModelInfo['reasoningReplay']
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-replay -->
@@ -2605,7 +2612,7 @@ export type Config = LocalConfig
 
 ## `@deepseek-ai/dsh-repeat-tool-reminder`
 
-- `source`: [`packages/guard/repeat-tool-reminder/src/index.ts:35`](../packages/guard/repeat-tool-reminder/src/index.ts)
+- `source`: [`packages/guard/repeat-tool-reminder/src/index.ts:36`](../packages/guard/repeat-tool-reminder/src/index.ts)
 
 ```ts config-catalog
 /**
@@ -2618,6 +2625,8 @@ export type Config = LocalConfig
  * (`exclude: [mcp_*]` must stay legal in a deployment that loads no MCP tools).
  */
 export interface Config {
+  /** Optional exact-copy suppression and bounded recovery for explicitly editable-plain reasoning; omitted disables output editing. */
+  reasoningLoop?: false | ReasoningLoopConfig
   /** Consecutive-repeat counts that trigger a reminder (default `[3, 5, 8]`). */
   thresholds?: number[]
   /** Tool-name patterns to track; empty means every tool is tracked. */
@@ -2632,6 +2641,71 @@ export interface Config {
    * always compares the FULL canonical string).
    */
   argumentsPreviewChars?: number
+}
+
+/** Explicit opt-in settings for editable-plain conversation-model output. */
+export interface ReasoningLoopConfig extends ReasoningWatchConfig {
+  /**
+   * Visible-output stall, or `false` to filter only proven exact copies. A stall
+   * holds output that looks repetitive, so `maxWindowChars` bounds the characters
+   * withheld from the user and session at any moment.
+   */
+  visibleStall: false | VisibleStallConfig
+  /** Maximum locally interrupted calls resumed within one turn, including native child agents. */
+  maxRecoveries: number
+  /** Post-tool settlement budget: each received event costs one plus its new delta's UTF-16 characters. */
+  settlementBudget: number
+}
+
+/** Deployment-selected detection, buffering, and delayed interruption budgets, in UTF-16 characters. */
+export interface ReasoningWatchConfig {
+  /** Maximum raw and accepted suffix retained independently. */
+  windowChars: number
+  /** Fixed internal observation cadence, independent of provider chunk boundaries. */
+  scanChars: number
+  /** Minimum exact repeated extent before subsequent input becomes tentative. */
+  holdChars: number
+  /** Minimum exact repeated extent before proven copies can be suppressed. */
+  confirmChars: number
+  /** Cumulative suppressed extent before a still-looping call can be interrupted. */
+  cancelChars: number
+  /** Unproven text retained before releasing a recovered suffix. */
+  recoveryChars: number
+  /** Maximum period searched by the exact-cycle detector. */
+  maxPeriodChars: number
+  /** Minimum complete sentence units for reordered-pool evidence. */
+  minPoolUnits: number
+  /** Minimum fraction of unit characters belonging to repeated exact units. */
+  poolShare: number
+}
+
+/** Deployment-selected observation, retention, and confirmation budgets, in UTF-16 characters. */
+export interface VisibleStallConfig {
+  /** Initial observation window; output is released as it arrives until one observation qualifies. */
+  windowChars: number
+  /** Ceiling for the expanding observation window and therefore for the held suffix. */
+  maxWindowChars: number
+  /** Observation cadence in observed characters, independent of provider delta boundaries. */
+  scanChars: number
+  /** Minimum complete sentence units inside one observation. */
+  minUnits: number
+  /** Minimum fraction of units whose trimmed text also occurs elsewhere in the observation. */
+  unitShare: number
+  /**
+   * Minimum fraction of sentence characters inside recurring sentences. A
+   * recurring interjection alone cannot qualify an observation whose content
+   * keeps arriving as new sentences, so this is the evidence that recurring
+   * sentences carry real mass rather than filler.
+   */
+  unitCharShare: number
+  /** Length of the exact fragments that measure reused characters. */
+  shingleChars: number
+  /** Minimum fraction of observation characters inside a fragment repeated at least `shingleChars * 2` away. */
+  shingleShare: number
+  /** Consecutive qualifying observations that confirm repetition and discard the held suffix. */
+  confirmWindows: number
+  /** Consecutive non-qualifying observations that release the held suffix verbatim. */
+  recoveryWindows: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-repeat-tool-reminder -->
