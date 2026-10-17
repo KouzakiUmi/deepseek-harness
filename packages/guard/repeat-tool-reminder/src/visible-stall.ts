@@ -6,6 +6,8 @@
  * characters it already released.
  */
 
+import { countTerminators, UNIT_PATTERN } from './sentence-units.ts'
+
 /** Largest observation window and held suffix this stall may retain, whatever the configuration says. */
 export const visibleStallRetentionCeiling = 8192
 
@@ -92,9 +94,6 @@ export interface VisibleStallResult {
   /** Withholding transition this character caused; absent while the withholding state is unchanged. */
   transition?: VisibleStallStage
 }
-
-/** Sentence terminators shared with the exact-copy pool metric, so both observe the same units. */
-const UNIT_PATTERN = /[^。！？!?；;\r\n]+[。！？!?；;\r\n]+/gu
 
 /** Characters that may delimit a fenced code block, and the delimiter run that counts as one. */
 const FENCE_MARKERS = '`~'
@@ -259,8 +258,18 @@ export class VisibleStallWatch {
     this.low = 0
   }
 
+  /** Whether two window positions carry the same shingle, compared by code unit. */
+  private sameShingle(left: number, right: number, size: number): boolean {
+    for (let index = 0; index < size; index += 1) {
+      if (this.raw.charCodeAt(left + index) !== this.raw.charCodeAt(right + index)) return false
+    }
+    return true
+  }
+
   /** Whether the current observation shows repeated sentences over reused characters. */
   private qualifies(): boolean {
+    // Each unit ends with at least one terminator; too few terminators cannot reach minUnits.
+    if (countTerminators(this.raw) < this.config.minUnits) return false
     const units = [...this.raw.matchAll(UNIT_PATTERN)].map(match => match[0].trim()).filter(unit => unit.length > 0)
     if (units.length < this.config.minUnits) return false
     const counts = new Map<string, number>()
@@ -280,22 +289,26 @@ export class VisibleStallWatch {
     if (repeatedChars / totalChars < this.config.unitCharShare) return false
     const size = this.config.shingleChars
     const distance = size * 2
-    const first = new Map<string, number>()
-    const covered = new Uint8Array(this.raw.length)
+    const raw = this.raw
+    const first = new Map<number, number[]>()
+    const covered = new Uint8Array(raw.length)
     let coveredChars = 0
-    for (let start = 0; start + size <= this.raw.length; start += 1) {
-      const fragment = this.raw.slice(start, start + size)
-      const previous = first.get(fragment)
-      if (previous === undefined) {
-        first.set(fragment, start)
-        continue
+    for (let start = 0; start + size <= raw.length; start += 1) {
+      let hash = 0
+      for (let index = 0; index < size; index += 1) hash = (Math.imul(hash, 31) + raw.charCodeAt(start + index)) | 0
+      const positions = first.get(hash)
+      let previous: number | undefined
+      if (positions === undefined) first.set(hash, [start])
+      else {
+        previous = positions.find(position => this.sameShingle(position, start, size))
+        if (previous === undefined) positions.push(start)
       }
-      if (start - previous < distance) continue
+      if (previous === undefined || start - previous < distance) continue
       for (let index = start; index < start + size; index += 1) {
         if (covered[index] === 0) { covered[index] = 1; coveredChars += 1 }
       }
     }
-    return coveredChars / this.raw.length >= this.config.shingleShare
+    return coveredChars / raw.length >= this.config.shingleShare
   }
 
   /**

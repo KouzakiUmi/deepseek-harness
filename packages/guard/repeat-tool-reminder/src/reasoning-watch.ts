@@ -1,5 +1,7 @@
 /** Bounded exact-copy evidence and tentative buffering for streamed reasoning. */
 
+import { countTerminators, patternIsInformative } from './sentence-units.ts'
+
 /** Deployment-selected detection, buffering, and delayed interruption budgets, in UTF-16 characters. */
 export interface ReasoningWatchConfig {
   /** Maximum raw and accepted suffix retained independently. */
@@ -25,6 +27,7 @@ export interface ReasoningWatchConfig {
 interface Span { start: number; end: number }
 interface Pending { start: number; text: string }
 interface Evidence { extent: number; copies: Span[] }
+
 
 /** Accepted text and the local decision after consuming one provider delta. */
 export interface ReasoningWatchResult {
@@ -175,8 +178,8 @@ export class ReasoningWatch {
     const copies: Span[] = []
     let extent = 0
     for (let period = 4; period <= this.config.maxPeriodChars && period * 3 <= this.raw.length; period += 1) {
+      if (!patternIsInformative(this.raw, period)) continue
       const pattern = this.raw.slice(-period)
-      if (pattern.trim().length < 2 || new Set(pattern).size < 2) continue
       let matched = period
       while (matched < this.raw.length
         && this.raw[this.raw.length - matched - 1] === this.raw[this.raw.length - matched - 1 + period]) matched += 1
@@ -185,25 +188,29 @@ export class ReasoningWatch {
       if (this.accepted.includes(pattern)) copies.push({ start: this.offset - matched + period, end: this.offset })
     }
 
-    const units = [...this.raw.matchAll(/[^。！？!?；;\r\n]+[。！？!?；;\r\n]+/gu)]
-    if (units.length >= this.config.minPoolUnits) {
-      const counts = new Map<string, number>()
-      let total = 0
-      for (const unit of units) {
-        counts.set(unit[0], (counts.get(unit[0]) ?? 0) + 1)
-        total += unit[0].length
-      }
-      let repeated = 0
-      const pooled: Span[] = []
-      for (const unit of units) {
-        const count = counts.get(unit[0])
-        if (count === undefined || count < 2) continue
-        repeated += unit[0].length
-        if (this.accepted.includes(unit[0])) pooled.push({ start: base + unit.index, end: base + unit.index + unit[0].length })
-      }
-      if (repeated / total >= this.config.poolShare) {
-        extent = Math.max(extent, repeated)
-        copies.push(...pooled)
+    // Every sentence unit ends with at least one terminator, so a window with too
+    // few terminators cannot reach minPoolUnits; skip the backtracking-prone scan.
+    if (countTerminators(this.raw) >= this.config.minPoolUnits) {
+      const units = [...this.raw.matchAll(/[^。！？!?；;\r\n]+[。！？!?；;\r\n]+/gu)]
+      if (units.length >= this.config.minPoolUnits) {
+        const counts = new Map<string, number>()
+        let total = 0
+        for (const unit of units) {
+          counts.set(unit[0], (counts.get(unit[0]) ?? 0) + 1)
+          total += unit[0].length
+        }
+        let repeated = 0
+        const pooled: Span[] = []
+        for (const unit of units) {
+          const count = counts.get(unit[0])
+          if (count === undefined || count < 2) continue
+          repeated += unit[0].length
+          if (this.accepted.includes(unit[0])) pooled.push({ start: base + unit.index, end: base + unit.index + unit[0].length })
+        }
+        if (repeated / total >= this.config.poolShare) {
+          extent = Math.max(extent, repeated)
+          copies.push(...pooled)
+        }
       }
     }
     return { extent, copies }
