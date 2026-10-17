@@ -20,18 +20,17 @@
       visibleStall: false
       maxRecoveries: 1
       settlementBudget: 65536
-- insert:
-    - id: llm-replay
-      name: '@deepseek-ai/dsh-llm-replay'
-      config:
-        providers:
-          - id: guard-replay-fixture
-            models:
-              - id: fixture
-                reasoningReplay: editable-plain
-            retryPolicy:
-              mode: always
-              backoff:
-                initialDelayMs: 1
-                maxDelayMs: 1
-                jitterRatio: 0
+- id: llm-replay
+  name: '@deepseek-ai/dsh-llm-replay'
+  config:
+    providers:
+      - id: guard-replay-fixture
+        models:
+          - id: fixture
+            reasoningReplay: editable-plain
+        retryPolicy:
+          mode: always
+          backoff:
+            initialDelayMs: 1
+            maxDelayMs: 1
+            jitterRatio: 0
